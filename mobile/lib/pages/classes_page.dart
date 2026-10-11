@@ -18,7 +18,7 @@ class _ClassesPageState extends State<ClassesPage> {
 
   bool get _admin => Api.i.role == 'ADMIN' && !widget.mine;
   Future<dynamic> _load() => Api.i.get(widget.mine ? '/my/classes' : '/classes');
-  void _reload() => setState(() => _f = _load());
+  void _reload() => setState(() { _f = _load(); });
 
   Future<void> _edit([Map? c]) async {
     List courses, teachers;

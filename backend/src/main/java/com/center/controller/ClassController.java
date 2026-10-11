@@ -85,14 +85,20 @@ public class ClassController {
                 + "from enrollments e join users u on u.id = e.student_id where e.class_id=? order by u.full_name", id);
     }
 
+    /** Admin ghi danh hộ (student_id trong body); học viên tự đăng ký thì luôn dùng chính mình. */
     @PostMapping("/classes/{id}/enroll")
-    public Map<String, Object> enroll(@PathVariable long id, @RequestBody Map<String, Object> b) {
-        Map<String, Object> c = db.queryForMap("select max_students, "
+    public Map<String, Object> enroll(@PathVariable long id, @RequestBody(required = false) Map<String, Object> b,
+                                      @AuthenticationPrincipal AuthUser me) {
+        boolean self = "STUDENT".equals(me.role());
+        long studentId = self ? me.id() : lng(b == null ? Map.of() : b, "student_id");
+        Map<String, Object> c = db.queryForMap("select max_students, status, "
                 + "(select count(*) from enrollments where class_id=?) as n from classes where id=?", id, id);
+        if (self && !"OPEN".equals(c.get("status")))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lớp không còn nhận đăng ký");
         if (((Number) c.get("n")).intValue() >= ((Number) c.get("max_students")).intValue())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lớp đã đủ học viên");
         return db.queryForMap("insert into enrollments(student_id,class_id) values(?,?) returning id, student_id, class_id",
-                lng(b, "student_id"), id);
+                studentId, id);
     }
 
     @DeleteMapping("/enrollments/{id}")

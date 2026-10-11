@@ -69,7 +69,7 @@ class _StudentsTabState extends State<_StudentsTab> {
     return r;
   }
 
-  void _reload() => setState(() => _f = _load());
+  void _reload() => setState(() { _f = _load(); });
 
   Future<void> _add() async {
     List all;
@@ -160,7 +160,7 @@ class _AttendanceTabState extends State<_AttendanceTab> {
     return r;
   }
 
-  void _reload() => setState(() => _f = _load());
+  void _reload() => setState(() { _f = _load(); });
 
   Future<void> _pickDate() async {
     final d = await showDatePicker(
