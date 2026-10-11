@@ -12,7 +12,7 @@ class CoursesPage extends StatefulWidget {
 
 class _CoursesPageState extends State<CoursesPage> {
   late Future<dynamic> _f = Api.i.get('/courses');
-  void _reload() => setState(() => _f = Api.i.get('/courses'));
+  void _reload() => setState(() { _f = Api.i.get('/courses'); });
 
   Future<void> _edit([Map? c]) async {
     final v = await showForm(

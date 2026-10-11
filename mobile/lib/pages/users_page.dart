@@ -23,7 +23,7 @@ class _UsersPageState extends State<UsersPage> {
         if (_search.text.trim().isNotEmpty) 'q': _search.text.trim(),
       });
 
-  void _reload() => setState(() => _f = _load());
+  void _reload() => setState(() { _f = _load(); });
 
   Future<void> _edit([Map? u]) async {
     final v = await showForm(

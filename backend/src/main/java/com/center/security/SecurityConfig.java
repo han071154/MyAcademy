@@ -37,6 +37,8 @@ public class SecurityConfig {
                     .hasAnyRole("ADMIN", "TEACHER")
                 .requestMatchers(HttpMethod.POST, "/api/attendance").hasAnyRole("ADMIN", "TEACHER")
                 .requestMatchers(HttpMethod.GET, "/api/classes", "/api/classes/*").authenticated()
+                // học viên tự đăng ký lớp học (admin cũng dùng chung endpoint để ghi danh hộ)
+                .requestMatchers(HttpMethod.POST, "/api/classes/*/enroll").hasAnyRole("ADMIN", "STUDENT")
                 // còn lại chỉ admin
                 .anyRequest().hasRole("ADMIN"))
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
