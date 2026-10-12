@@ -15,7 +15,7 @@ spring:
 
 
 app:
-  jwt-secret: ${JWT_SECRET:doi-chuoi-nay-thanh-bi-mat-dai-it-nhat-32-ky-tu-nhe}
+  jwt-secret: ${JWT_SECRET:}
   jwt-expire-hours: 24
   admin-email: ${ADMIN_EMAIL:admin@center.com}
-  admin-password: ${ADMIN_PASSWORD:admin123}
+  admin-password: ${ADMIN_PASSWORD:}

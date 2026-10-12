@@ -65,19 +65,36 @@ class _PaymentsPageState extends State<PaymentsPage> {
                       final d = list[i] as Map;
                       final debt = d['debt'] as num;
                       return SoftCard(
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.fromLTRB(14, 6, 12, 6),
-                          leading: InitialAvatar(d['student_name']),
-                          title: Text('${d['student_name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text('${d['class_name']}\n'
-                              'Học phí ${vnd(d['fee'])} • Đã đóng ${vnd(d['paid'])}\n'
-                              '${debt > 0 ? 'Còn nợ ${vnd(debt)}' : 'Đã đóng đủ'}',
-                              style: TextStyle(color: debt > 0 ? AppColors.danger : AppColors.muted)),
-                          isThreeLine: true,
-                          trailing: debt > 0
-                              ? FilledButton.tonal(onPressed: () => _pay(d), child: const Text('Thu tiền'))
-                              : const Icon(Icons.check_circle, color: AppColors.ok),
-                        ),
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Row(children: [
+                            InitialAvatar(d['student_name']),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('${d['student_name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                Text('${d['class_name']}', style: const TextStyle(color: AppColors.muted)),
+                              ]),
+                            ),
+                            if (debt <= 0) const Icon(Icons.check_circle, color: AppColors.ok),
+                          ]),
+                          const SizedBox(height: 10),
+                          Wrap(spacing: 16, runSpacing: 4, children: [
+                            Text('Học phí: ${vnd(d['fee'])}', style: const TextStyle(color: AppColors.muted)),
+                            Text('Đã đóng: ${vnd(d['paid'])}', style: const TextStyle(color: AppColors.muted)),
+                          ]),
+                          const SizedBox(height: 6),
+                          Row(children: [
+                            Expanded(
+                              child: Text(debt > 0 ? 'Còn nợ ${vnd(debt)}' : 'Đã đóng đủ',
+                                  style: TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: debt > 0 ? AppColors.danger : AppColors.ok)),
+                            ),
+                            if (debt > 0)
+                              FilledButton.tonal(onPressed: () => _pay(d), child: const Text('Thu tiền')),
+                          ]),
+                        ]),
                       );
                     },
                   );

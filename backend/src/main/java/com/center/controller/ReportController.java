@@ -30,11 +30,12 @@ public class ReportController {
                   - (select coalesce(sum(amount), 0) from payments) as total_debt
                 """));
         r.put("monthly", db.queryForList("""
-                select to_char(date_trunc('month', paid_at), 'MM/YYYY') as month, sum(amount) as total
-                from payments
-                group by date_trunc('month', paid_at)
-                order by date_trunc('month', paid_at) desc
-                limit 6
+                select to_char(m, 'MM/YYYY') as month, coalesce(sum(p.amount), 0) as total
+                from generate_series(date_trunc('month', now()) - interval '5 months',
+                                     date_trunc('month', now()), interval '1 month') as m
+                left join payments p on date_trunc('month', p.paid_at) = m
+                group by m
+                order by m desc
                 """));
         return r;
     }

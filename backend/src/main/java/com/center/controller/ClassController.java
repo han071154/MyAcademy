@@ -8,6 +8,7 @@ import java.util.Map;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -71,8 +72,11 @@ public class ClassController {
     public List<Map<String, Object>> mine(@AuthenticationPrincipal AuthUser me) {
         return switch (me.role()) {
             case "TEACHER" -> db.queryForList(LIST + " where cl.teacher_id=? order by cl.start_date desc nulls last", me.id());
-            case "STUDENT" -> db.queryForList(LIST + " where cl.id in (select class_id from enrollments "
-                    + "where student_id=?) order by cl.start_date desc nulls last", me.id());
+            // kèm số tiền học viên đã đóng cho từng lớp để hiện công nợ trên Trang chủ
+            case "STUDENT" -> db.queryForList("select x.*, (select coalesce(sum(p.amount), 0) from payments p "
+                    + "join enrollments e on e.id = p.enrollment_id where e.class_id = x.id and e.student_id = ?) as paid "
+                    + "from (" + LIST + " where cl.id in (select class_id from enrollments where student_id=?)) x "
+                    + "order by x.start_date desc nulls last", me.id(), me.id());
             default -> list();
         };
     }
@@ -86,16 +90,23 @@ public class ClassController {
     }
 
     /** Admin ghi danh hộ (student_id trong body); học viên tự đăng ký thì luôn dùng chính mình. */
+    @Transactional
     @PostMapping("/classes/{id}/enroll")
     public Map<String, Object> enroll(@PathVariable long id, @RequestBody(required = false) Map<String, Object> b,
                                       @AuthenticationPrincipal AuthUser me) {
         boolean self = "STUDENT".equals(me.role());
         long studentId = self ? me.id() : lng(b == null ? Map.of() : b, "student_id");
-        Map<String, Object> c = db.queryForMap("select max_students, status, "
-                + "(select count(*) from enrollments where class_id=?) as n from classes where id=?", id, id);
+        // Khóa dòng lớp học đến hết transaction để 2 người đăng ký cùng lúc không vượt sĩ số
+        Map<String, Object> c = db.queryForMap("select max_students, status from classes where id=? for update", id);
         if (self && !"OPEN".equals(c.get("status")))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lớp không còn nhận đăng ký");
-        if (((Number) c.get("n")).intValue() >= ((Number) c.get("max_students")).intValue())
+        Integer dup = db.queryForObject("select count(*) from enrollments where class_id=? and student_id=?",
+                Integer.class, id, studentId);
+        if (dup != null && dup > 0)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    self ? "Bạn đã đăng ký lớp này" : "Học viên đã có trong lớp này");
+        Integer n = db.queryForObject("select count(*) from enrollments where class_id=?", Integer.class, id);
+        if (n != null && n >= ((Number) c.get("max_students")).intValue())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lớp đã đủ học viên");
         return db.queryForMap("insert into enrollments(student_id,class_id) values(?,?) returning id, student_id, class_id",
                 studentId, id);
@@ -104,6 +115,28 @@ public class ClassController {
     @DeleteMapping("/enrollments/{id}")
     public void unenroll(@PathVariable long id) {
         db.update("delete from enrollments where id=?", id);
+    }
+
+    /** Học viên tự hủy đăng ký: chỉ khi lớp còn mở và chưa đóng tiền / chưa điểm danh. */
+    @Transactional
+    @DeleteMapping("/my/classes/{classId}")
+    public void cancelMine(@PathVariable long classId, @AuthenticationPrincipal AuthUser me) {
+        if (!"STUDENT".equals(me.role()))
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Chỉ học viên mới tự hủy đăng ký");
+        List<Map<String, Object>> rows = db.queryForList("select e.id, cl.status, "
+                + "exists(select 1 from payments p where p.enrollment_id = e.id) as paid, "
+                + "exists(select 1 from attendances a where a.enrollment_id = e.id) as attended "
+                + "from enrollments e join classes cl on cl.id = e.class_id "
+                + "where e.class_id=? and e.student_id=? for update of e", classId, me.id());
+        if (rows.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Bạn chưa đăng ký lớp này");
+        Map<String, Object> e = rows.get(0);
+        if (!"OPEN".equals(e.get("status")))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lớp đã bắt đầu, vui lòng liên hệ trung tâm để hủy");
+        if ((Boolean) e.get("paid") || (Boolean) e.get("attended"))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Bạn đã đóng học phí hoặc đã đi học, vui lòng liên hệ trung tâm để hủy");
+        db.update("delete from enrollments where id=?", e.get("id"));
     }
 
     // ---------- Điểm danh ----------

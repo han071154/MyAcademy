@@ -63,8 +63,13 @@ public class PaymentController {
                 """, BigDecimal.class, eid);
         if (debt != null && amount.compareTo(debt) > 0)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Số tiền vượt quá công nợ còn lại");
-        return db.queryForMap("insert into payments(enrollment_id, amount, method, note) values(?,?,?,?) returning *",
-                eid, amount, strOr(b, "method", "CASH"), str(b, "note"));
+        // paid_at (yyyy-MM-dd, không bắt buộc): ghi lại phiếu thu của ngày trước; bỏ trống = thời điểm hiện tại
+        String paidAt = str(b, "paid_at");
+        if (paidAt != null && java.time.LocalDate.parse(paidAt).isAfter(java.time.LocalDate.now()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ngày thu không được ở tương lai");
+        return db.queryForMap("insert into payments(enrollment_id, amount, method, note, paid_at) "
+                        + "values(?,?,?,?, coalesce(cast(? as date) + time '09:00', now())) returning *",
+                eid, amount, strOr(b, "method", "CASH"), str(b, "note"), paidAt);
     }
 
     @DeleteMapping("/{id}")

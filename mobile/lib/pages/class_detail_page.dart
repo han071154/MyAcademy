@@ -157,6 +157,7 @@ class _AttendanceTabState extends State<_AttendanceTab> {
     _st
       ..clear()
       ..addAll({for (final x in r) (x['enrollment_id'] as num).toInt(): (x['status'] ?? 'PRESENT') as String});
+    if (mounted) setState(() {}); // vẽ lại nút "Lưu điểm danh" (nằm ngoài Loader) sau khi có dữ liệu
     return r;
   }
 
@@ -229,8 +230,9 @@ class _AttendanceTabState extends State<_AttendanceTab> {
             },
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.all(12),
+        SafeArea(
+          top: false,
+          minimum: const EdgeInsets.all(12),
           child: SizedBox(
             width: double.infinity,
             child: FilledButton.icon(

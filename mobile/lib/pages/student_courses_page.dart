@@ -17,7 +17,8 @@ class _StudentCoursesPageState extends State<StudentCoursesPage> {
   Future<Map<String, dynamic>> _load() async {
     final courses = await Api.i.get('/courses') as List;
     final classes = await Api.i.get('/classes') as List;
-    return {'courses': courses, 'classes': classes};
+    final mine = await Api.i.get('/my/classes') as List;
+    return {'courses': courses, 'classes': classes, 'mine': mine.map((c) => c['id']).toSet()};
   }
 
   void _reload() => setState(() {
@@ -35,7 +36,18 @@ class _StudentCoursesPageState extends State<StudentCoursesPage> {
     }
   }
 
-  void _openClasses(Map course, List classes) {
+  Future<void> _cancel(Map cls) async {
+    if (!await confirm(context, 'Hủy đăng ký lớp "${cls['name']}"?')) return;
+    if (!mounted) return;
+    final ok = await guard(context, () => Api.i.delete('/my/classes/${cls['id']}'));
+    if (ok && mounted) {
+      Navigator.pop(context);
+      toast(context, 'Đã hủy đăng ký');
+      _reload();
+    }
+  }
+
+  void _openClasses(Map course, List classes, Set mine) {
     final open = classes.where((c) => c['course_id'] == course['id'] && c['status'] == 'OPEN').toList();
     showModalBottomSheet(
       context: context,
@@ -61,6 +73,7 @@ class _StudentCoursesPageState extends State<StudentCoursesPage> {
                       itemBuilder: (_, i) {
                         final c = open[i] as Map;
                         final full = (c['enrolled'] as num) >= (c['max_students'] as num);
+                        final joined = mine.contains(c['id']);
                         return SoftCard(
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(14),
@@ -72,10 +85,15 @@ class _StudentCoursesPageState extends State<StudentCoursesPage> {
                             const SizedBox(height: 12),
                             SizedBox(
                               width: double.infinity,
-                              child: FilledButton(
-                                onPressed: full ? null : () => _register(c),
-                                child: Text(full ? 'Lớp đã đầy' : 'Đăng ký lớp này'),
-                              ),
+                              child: joined
+                                  ? OutlinedButton(
+                                      onPressed: () => _cancel(c),
+                                      child: const Text('Đã đăng ký • Hủy đăng ký'),
+                                    )
+                                  : FilledButton(
+                                      onPressed: full ? null : () => _register(c),
+                                      child: Text(full ? 'Lớp đã đầy' : 'Đăng ký lớp này'),
+                                    ),
                             ),
                           ]),
                         );
@@ -96,6 +114,7 @@ class _StudentCoursesPageState extends State<StudentCoursesPage> {
           final d = data as Map;
           final courses = d['courses'] as List;
           final classes = d['classes'] as List;
+          final mine = d['mine'] as Set;
           if (courses.isEmpty) return const EmptyState('Trung tâm chưa có khóa học nào');
           return RefreshIndicator(
             onRefresh: () async {
@@ -145,7 +164,7 @@ class _StudentCoursesPageState extends State<StudentCoursesPage> {
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.tonal(
-                        onPressed: () => _openClasses(c, classes),
+                        onPressed: () => _openClasses(c, classes, mine),
                         child: const Text('Xem lớp & Đăng ký'),
                       ),
                     ),

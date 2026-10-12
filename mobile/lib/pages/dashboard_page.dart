@@ -17,6 +17,23 @@ class _DashboardPageState extends State<DashboardPage> {
   late Future<dynamic> _f = Api.i.get('/reports/summary');
   void _reload() => setState(() { _f = Api.i.get('/reports/summary'); });
 
+  // Thu tiền, thêm học viên, ... ở bất kỳ trang nào → số liệu Trang chủ tự cập nhật
+  void _onChanged() {
+    if (mounted) _reload();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    Api.i.changes.addListener(_onChanged);
+  }
+
+  @override
+  void dispose() {
+    Api.i.changes.removeListener(_onChanged);
+    super.dispose();
+  }
+
   num _n(dynamic v) => num.tryParse('$v') ?? 0;
 
   Widget _greeting(BuildContext context) {
@@ -37,26 +54,38 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _quickLinks(BuildContext context) {
-    Widget tile(IconData icon, String label, Color color, Widget Function() page) => Expanded(
+    Widget tile(IconData icon, String label, Color color, Widget Function() page, {String? pageTitle}) {
+      final title = pageTitle ?? label;
+      return Expanded(
           child: SoftCard(
             margin: EdgeInsets.zero,
             padding: const EdgeInsets.symmetric(vertical: 14),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => page())),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => Scaffold(appBar: AppBar(title: Text(title)), body: page()))),
             child: Column(children: [
               IconBox(icon, color),
               const SizedBox(height: 8),
-              Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+              Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
             ]),
           ),
         );
+    }
     return Row(children: [
-      tile(Icons.school_outlined, 'Học viên', AppColors.primary, () => const UsersPage(role: 'STUDENT')),
+      tile(Icons.school_outlined, 'Học viên', AppColors.primary, () => const UsersPage(role: 'STUDENT'),
+          pageTitle: 'Quản lý học viên'),
       const SizedBox(width: 10),
-      tile(Icons.person_outline, 'Giáo viên', const Color(0xFF3B6FD4), () => const UsersPage(role: 'TEACHER')),
+      tile(Icons.person_outline, 'Giáo viên', const Color(0xFF3B6FD4), () => const UsersPage(role: 'TEACHER'),
+          pageTitle: 'Quản lý giáo viên'),
       const SizedBox(width: 10),
       tile(Icons.menu_book_outlined, 'Khóa học', AppColors.amber, () => const CoursesPage()),
       const SizedBox(width: 10),
-      tile(Icons.payments_outlined, 'Học phí', AppColors.ok, () => const PaymentsPage()),
+      tile(Icons.payments_outlined, 'Học phí', AppColors.ok, () => const PaymentsPage(),
+          pageTitle: 'Học phí'),
     ]);
   }
 
@@ -103,8 +132,7 @@ class _DashboardPageState extends State<DashboardPage> {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('$value', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-                Text(label,
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+                Text(label, maxLines: 2, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
               ]),
             ),
           ]),
@@ -125,7 +153,9 @@ class _DashboardPageState extends State<DashboardPage> {
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 7),
             child: Row(children: [
-              SizedBox(width: 64, child: Text('${m['month']}', style: const TextStyle(color: AppColors.muted))),
+              SizedBox(
+                  width: 78,
+                  child: Text('${m['month']}', softWrap: false, style: const TextStyle(color: AppColors.muted))),
               Expanded(
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(6),
@@ -138,7 +168,15 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ),
               const SizedBox(width: 12),
-              Text(vnd(m['total']), style: const TextStyle(fontWeight: FontWeight.w600)),
+              // cột số tiền cố định độ rộng để các thanh cùng chiều dài tối đa, so sánh được giữa các tháng
+              SizedBox(
+                width: 112,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(vnd(m['total']), style: const TextStyle(fontWeight: FontWeight.w600)),
+                ),
+              ),
             ]),
           ),
       ]),
@@ -174,7 +212,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 Row(children: [
                   _stat(Icons.menu_book_outlined, 'Khóa học', s['courses'], AppColors.amber),
                   const SizedBox(width: 12),
-                  _stat(Icons.class_outlined, 'Lớp đang mở', s['active_classes'], const Color(0xFF8A5BD4)),
+                  _stat(Icons.class_outlined, 'Lớp hoạt động', s['active_classes'], const Color(0xFF8A5BD4)),
                 ]),
                 const SizedBox(height: 24),
                 Text('Quản lý nhanh',
@@ -185,7 +223,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 Text('Doanh thu theo tháng',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 10),
-                if (monthly.isEmpty)
+                if (monthly.every((m) => _n(m['total']) == 0))
                   const SoftCard(
                     margin: EdgeInsets.zero,
                     padding: EdgeInsets.all(20),
