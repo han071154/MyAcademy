@@ -14,10 +14,12 @@ cd backend
 export DB_URL="jdbc:postgresql://aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require"
 export DB_USER="postgres.<project-ref>"
 export DB_PASSWORD="<mật khẩu database>"
-export JWT_SECRET="<chuỗi bí mật ≥ 32 ký tự>"
+export JWT_SECRET="<chuỗi bí mật ≥ 32 ký tự>"   # bắt buộc
+export ADMIN_PASSWORD="<mật khẩu admin>"       # bắt buộc ở lần chạy đầu
 mvn spring-boot:run
 ```
-Lần chạy đầu tự tạo admin: `admin@center.com` / `admin123` (đổi bằng ADMIN_EMAIL, ADMIN_PASSWORD).
+Lần chạy đầu tự tạo admin `admin@center.com` (đổi bằng ADMIN_EMAIL) với mật khẩu lấy từ ADMIN_PASSWORD.
+Không có giá trị mặc định cho JWT_SECRET / ADMIN_PASSWORD: thiếu thì backend báo lỗi và dừng.
 Trên Windows PowerShell dùng `$env:DB_URL="..."`. Hoặc tạo Run Configuration trong IDE với các biến môi trường trên.
 
 ## 3. Flutter
@@ -56,7 +58,9 @@ flutter run --dart-define=API_URL=http://10.0.2.2:8080/api
 | GET | /api/classes, /api/classes/{id} | đã đăng nhập; POST/PUT/DELETE: admin |
 | GET | /api/my/classes | lớp của tôi |
 | GET | /api/classes/{id}/students | admin, giáo viên phụ trách |
-| POST | /api/classes/{id}/enroll · DELETE /api/enrollments/{id} | admin |
+| POST | /api/classes/{id}/enroll | admin, học viên (tự đăng ký) |
+| DELETE | /api/enrollments/{id} | admin |
+| DELETE | /api/my/classes/{id} | học viên tự hủy (lớp còn mở, chưa đóng tiền/điểm danh) |
 | GET | /api/classes/{id}/attendance?date= · POST /api/attendance | admin, giáo viên phụ trách |
 | GET/POST/DELETE | /api/payments · GET /api/payments/debts | admin |
 | GET | /api/reports/summary | admin |
@@ -74,4 +78,4 @@ mobile/lib/pages/       login, home(drawer theo vai trò), dashboard, users, cou
 ## Hạn chế / hướng mở rộng
 - Học viên/giáo viên dùng chung bảng `users` (cột role); lịch học lưu dạng chữ (`schedule`).
 - Mới là bản cơ bản: chưa có phân trang, quên mật khẩu, upload ảnh, thông báo đẩy.
-- Trước khi triển khai thật: đổi JWT_SECRET, mật khẩu admin, giới hạn CORS trong `SecurityConfig`.
+- Trước khi triển khai thật: giới hạn CORS trong `SecurityConfig`.

@@ -16,6 +16,8 @@ public class JwtService {
 
     public JwtService(@Value("${app.jwt-secret}") String secret,
                       @Value("${app.jwt-expire-hours}") long hours) {
+        if (secret.getBytes(StandardCharsets.UTF_8).length < 32)
+            throw new IllegalStateException("Chưa đặt biến môi trường JWT_SECRET (cần chuỗi bí mật ≥ 32 ký tự)");
         this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expireMs = hours * 3_600_000L;
     }

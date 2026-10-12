@@ -23,6 +23,8 @@ public class CenterApplication {
         return args -> {
             Integer n = db.queryForObject("select count(*) from users where role='ADMIN'", Integer.class);
             if (n != null && n == 0) {
+                if (password.isBlank())
+                    throw new IllegalStateException("Chưa có admin: đặt biến môi trường ADMIN_PASSWORD để tạo tài khoản đầu tiên");
                 db.update("insert into users(email,password_hash,full_name,role) values(?,?,?,'ADMIN')",
                         email, enc.encode(password), "Quản trị viên");
                 System.out.println(">>> Đã tạo admin: " + email);

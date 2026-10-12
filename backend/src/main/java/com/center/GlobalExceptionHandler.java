@@ -33,7 +33,8 @@ public class GlobalExceptionHandler {
         return body(HttpStatus.NOT_FOUND, "Không tìm thấy dữ liệu");
     }
 
-    @ExceptionHandler({NumberFormatException.class, HttpMessageNotReadableException.class})
+    @ExceptionHandler({NumberFormatException.class, HttpMessageNotReadableException.class,
+            java.time.format.DateTimeParseException.class})
     ResponseEntity<Map<String, String>> bad(Exception e) {
         return body(HttpStatus.BAD_REQUEST, "Dữ liệu gửi lên không hợp lệ");
     }

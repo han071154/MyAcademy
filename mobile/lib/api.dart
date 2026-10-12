@@ -66,9 +66,18 @@ class Api {
 
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) =>
       _wrap(() => dio.get(path, queryParameters: query));
-  Future<dynamic> post(String path, [dynamic data]) => _wrap(() => dio.post(path, data: data));
-  Future<dynamic> put(String path, [dynamic data]) => _wrap(() => dio.put(path, data: data));
-  Future<dynamic> delete(String path) => _wrap(() => dio.delete(path));
+  Future<dynamic> post(String path, [dynamic data]) => _changed(_wrap(() => dio.post(path, data: data)));
+  Future<dynamic> put(String path, [dynamic data]) => _changed(_wrap(() => dio.put(path, data: data)));
+  Future<dynamic> delete(String path) => _changed(_wrap(() => dio.delete(path)));
+
+  /// Tăng mỗi khi thêm/sửa/xóa thành công: các trang tổng hợp (Trang chủ) lắng nghe để tự tải lại.
+  final ValueNotifier<int> changes = ValueNotifier(0);
+
+  Future<dynamic> _changed(Future<dynamic> f) async {
+    final r = await f;
+    changes.value++;
+    return r;
+  }
 
   Future<dynamic> _wrap(Future<Response> Function() f) async {
     try {

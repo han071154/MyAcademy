@@ -5,7 +5,7 @@ import 'theme.dart';
 
 // ---------- Định dạng ----------
 String vnd(dynamic n) =>
-    '${NumberFormat.decimalPattern('vi').format(n is num ? n : (num.tryParse('$n') ?? 0))} đ';
+    '${NumberFormat.decimalPattern('vi').format(n is num ? n : (num.tryParse('$n') ?? 0))} đ';
 
 String fmtDate(dynamic s) {
   final d = DateTime.tryParse('${s ?? ''}');
@@ -37,7 +37,18 @@ Future<bool> guard(BuildContext c, Future<void> Function() f) async {
     await f();
     return true;
   } catch (e) {
-    if (c.mounted) toast(c, '$e');
+    // Dùng hộp thoại thay vì SnackBar: SnackBar bị bảng chọn (bottom sheet) / hộp thoại che mất
+    if (c.mounted) {
+      await showDialog<void>(
+        context: c,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.white,
+          title: const Text('Không thực hiện được'),
+          content: Text('$e'),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Đóng'))],
+        ),
+      );
+    }
     return false;
   }
 }
