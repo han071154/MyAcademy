@@ -79,8 +79,8 @@ class _DashboardPageState extends State<DashboardPage> {
       tile(Icons.school_outlined, 'Học viên', AppColors.primary, () => const UsersPage(role: 'STUDENT'),
           pageTitle: 'Quản lý học viên'),
       const SizedBox(width: 10),
-      tile(Icons.person_outline, 'Giáo viên', const Color(0xFF3B6FD4), () => const UsersPage(role: 'TEACHER'),
-          pageTitle: 'Quản lý giáo viên'),
+      tile(Icons.person_outline, 'Giảng viên', const Color(0xFF3B6FD4), () => const UsersPage(role: 'TEACHER'),
+          pageTitle: 'Quản lý giảng viên'),
       const SizedBox(width: 10),
       tile(Icons.menu_book_outlined, 'Khóa học', AppColors.amber, () => const CoursesPage()),
       const SizedBox(width: 10),
@@ -206,7 +206,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 Row(children: [
                   _stat(Icons.school_outlined, 'Học viên', s['students'], AppColors.primary),
                   const SizedBox(width: 12),
-                  _stat(Icons.person_outline, 'Giáo viên', s['teachers'], const Color(0xFF3B6FD4)),
+                  _stat(Icons.person_outline, 'Giảng viên', s['teachers'], const Color(0xFF3B6FD4)),
                 ]),
                 const SizedBox(height: 12),
                 Row(children: [

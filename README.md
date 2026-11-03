@@ -1,81 +1,49 @@
 # Quản lý trung tâm ngoại ngữ
 
-Flutter (mobile/) → Java Spring Boot API (backend/) → Supabase PostgreSQL (database/)
+Flutter (`mobile/`) → Supabase Cloud (trực tiếp, không cần backend Java)
 
-## 1. Database (Supabase)
-1. Tạo project trên supabase.com.
-2. SQL Editor → dán toàn bộ `database/schema.sql` → Run.
-3. Connect → lấy chuỗi **Session pooler** (host dạng `aws-0-<region>.pooler.supabase.com`, port 5432,
-   user `postgres.<project-ref>`). Dùng pooler vì host trực tiếp của Supabase thường chỉ có IPv6.
+## 1. Thiết lập Supabase (Chỉ làm 1 lần duy nhất)
+1. Mở project trên [supabase.com](https://supabase.com).
+2. Vào **SQL Editor** → Mở file `database/supabase_setup.sql`, dán toàn bộ nội dung và bấm **Run**.
+   *(File này sẽ cấu hình quyền, bảng `assignments`, `submissions`, các view thống kê, tạo sẵn tài khoản Admin `admin@center.com` / mật khẩu `123456`).*
 
-## 2. Backend (Java 17+, Maven)
-```bash
-cd backend
-export DB_URL="jdbc:postgresql://aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require"
-export DB_USER="postgres.<project-ref>"
-export DB_PASSWORD="<mật khẩu database>"
-export JWT_SECRET="<chuỗi bí mật ≥ 32 ký tự>"   # bắt buộc
-export ADMIN_PASSWORD="<mật khẩu admin>"       # bắt buộc ở lần chạy đầu
-mvn spring-boot:run
-```
-Lần chạy đầu tự tạo admin `admin@center.com` (đổi bằng ADMIN_EMAIL) với mật khẩu lấy từ ADMIN_PASSWORD.
-Không có giá trị mặc định cho JWT_SECRET / ADMIN_PASSWORD: thiếu thì backend báo lỗi và dừng.
-Trên Windows PowerShell dùng `$env:DB_URL="..."`. Hoặc tạo Run Configuration trong IDE với các biến môi trường trên.
-
-## 3. Flutter
+## 2. Chạy ứng dụng Flutter
+Từ nay về sau, **bạn chỉ cần duy nhất 1 lệnh**:
 ```bash
 cd mobile
-flutter create --project-name center_app --platforms=android,ios,web .   # sinh thư mục nền tảng, giữ nguyên lib/ và pubspec.yaml
-flutter pub get
-flutter run --dart-define=API_URL=http://10.0.2.2:8080/api
+flutter run
 ```
-- Android emulator: `10.0.2.2`. Điện thoại thật: IP LAN của máy (VD `http://192.168.1.10:8080/api`)
-  hoặc `adb reverse tcp:8080 tcp:8080` rồi dùng `http://localhost:8080/api`.
-- Android chặn HTTP thường: thêm `android:usesCleartextTraffic="true"` vào thẻ `<application>` trong
-  `android/app/src/main/AndroidManifest.xml` (chỉ dùng khi dev).
+- Không cần cài đặt hay chạy backend Spring Boot.
+- Không cần thiết lập biến môi trường phức tạp (`DB_URL`, `JWT_SECRET`,...).
+- Flutter tự kết nối trực tiếp đến Supabase qua internet.
 
-## Quy trình thử nhanh
-1. Đăng nhập admin → thêm giáo viên, học viên (mật khẩu mặc định 123456).
-2. Lớp học → thêm lớp (chọn khóa học + giáo viên) → mở lớp → thêm học viên.
-3. Đăng nhập giáo viên → Lớp tôi dạy → tab Điểm danh.
-4. Admin → Học phí → Thu tiền; Tổng quan xem thống kê.
-5. Đăng nhập học viên → xem lịch học của mình.
+## 3. Các tính năng chính theo vai trò
+- **Học viên (Student)**:
+  - Trang chủ cá nhân hóa với Thẻ học viên, học phí đã nộp & công nợ, lịch học.
+  - Tab **Lớp học**: Hiển thị trực tiếp các lớp đã đăng ký.
+  - Mỗi lớp học có không gian riêng gồm:
+    - **Bài tập**: Xem đề bài, hạn nộp, nộp bài bằng **file** hoặc **ảnh**, xem điểm số và nhận xét từ giảng viên.
+    - **Điểm danh của tôi**: Thống kê số buổi có mặt / trễ / vắng và tỷ lệ chuyên cần.
+    - **Thông tin lớp**: Xem lịch học, phòng học, học phí, giảng viên.
+    - Nút đăng ký thêm khóa học mới (`StudentCoursesPage`).
+- **Giáo viên (Teacher)**:
+  - Trang chủ giảng viên: Lớp phụ trách, tổng số học viên, nút điểm danh nhanh.
+  - Trong từng lớp dạy:
+    - **Học viên**: Xem danh sách học viên trong lớp.
+    - **Điểm danh**: Điểm danh từng buổi (Có mặt / Trễ / Vắng) kèm ghi chú.
+    - **Bài tập**: Giao bài tập mới (hạn nộp, file đề bài đính kèm).
+    - **Chấm điểm**: Xem danh sách học viên đã nộp, xem file/ảnh bài làm, chấm điểm (thang 10) và gửi nhận xét.
+- **Quản trị viên (Admin)**:
+  - Dashboard tổng quan doanh thu, thống kê 6 tháng.
+  - Quản lý học viên, giáo viên, khóa học, lớp học và thu học phí.
 
-## Phân quyền
-| Vai trò | Quyền |
-|---|---|
-| ADMIN | Toàn bộ |
-| TEACHER | Xem lớp mình dạy, danh sách học viên, điểm danh |
-| STUDENT | Xem lớp mình đang học |
-
-## API
-| Method | Đường dẫn | Ghi chú |
-|---|---|---|
-| POST | /api/auth/login | công khai |
-| GET | /api/auth/me · POST /api/auth/change-password | đã đăng nhập |
-| GET/POST/PUT/DELETE | /api/users (?role=&q=) | admin |
-| GET | /api/courses | đã đăng nhập; POST/PUT/DELETE: admin |
-| GET | /api/classes, /api/classes/{id} | đã đăng nhập; POST/PUT/DELETE: admin |
-| GET | /api/my/classes | lớp của tôi |
-| GET | /api/classes/{id}/students | admin, giáo viên phụ trách |
-| POST | /api/classes/{id}/enroll | admin, học viên (tự đăng ký) |
-| DELETE | /api/enrollments/{id} | admin |
-| DELETE | /api/my/classes/{id} | học viên tự hủy (lớp còn mở, chưa đóng tiền/điểm danh) |
-| GET | /api/classes/{id}/attendance?date= · POST /api/attendance | admin, giáo viên phụ trách |
-| GET/POST/DELETE | /api/payments · GET /api/payments/debts | admin |
-| GET | /api/reports/summary | admin |
-
-## Cấu trúc
+## 4. Cấu trúc mã nguồn
 ```
-database/schema.sql     6 bảng: users, courses, classes, enrollments, attendances, payments
-backend/…/controller    Auth, User, Course, Class (+ghi danh, điểm danh), Payment, Report
-backend/…/security      JWT + phân quyền theo vai trò
-mobile/lib/api.dart     Dio client, lưu token
-mobile/lib/widgets.dart Form động, Loader, tiện ích dùng chung
-mobile/lib/pages/       login, home(drawer theo vai trò), dashboard, users, courses, classes, class_detail, payments
+database/supabase_setup.sql             Bảng assignments, submissions, views, RPC, RLS
+mobile/lib/api.dart                     Supabase Client API + File/Image Upload
+mobile/lib/pages/student_classes_page.dart         Danh sách lớp đã đăng ký của học viên
+mobile/lib/pages/student_class_space_page.dart     Không gian lớp (Bài tập, Điểm danh, Thông tin)
+mobile/lib/pages/student_assignment_detail_page.dart Chi tiết bài tập & nộp bài dạng file/ảnh
+mobile/lib/pages/teacher_assignment_grading_page.dart Chấm điểm bài nộp & gửi nhận xét của GV
+mobile/lib/pages/class_detail_page.dart            Chi tiết lớp (Học viên, Điểm danh, Giao bài)
 ```
-
-## Hạn chế / hướng mở rộng
-- Học viên/giáo viên dùng chung bảng `users` (cột role); lịch học lưu dạng chữ (`schedule`).
-- Mới là bản cơ bản: chưa có phân trang, quên mật khẩu, upload ảnh, thông báo đẩy.
-- Trước khi triển khai thật: giới hạn CORS trong `SecurityConfig`.

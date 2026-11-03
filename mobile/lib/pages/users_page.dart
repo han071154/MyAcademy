@@ -16,7 +16,7 @@ class _UsersPageState extends State<UsersPage> {
   final _search = TextEditingController();
   late Future<dynamic> _f = _load();
 
-  String get _label => widget.role == 'TEACHER' ? 'giáo viên' : 'học viên';
+  String get _label => widget.role == 'TEACHER' ? 'giảng viên' : 'học viên';
 
   Future<dynamic> _load() => Api.i.get('/users', query: {
         'role': widget.role,

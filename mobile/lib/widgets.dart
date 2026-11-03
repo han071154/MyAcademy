@@ -22,7 +22,17 @@ String initial(dynamic name) {
   return s.isEmpty ? '?' : s.substring(0, 1).toUpperCase();
 }
 
-const classStatus = {'OPEN': 'Đang tuyển sinh', 'ONGOING': 'Đang học', 'CLOSED': 'Đã kết thúc'};
+const classStatus = {'OPEN': 'Đang tuyển sinh', 'ONGOING': 'Đang diễn ra', 'CLOSED': 'Đã kết thúc'};
+
+String classStatusLabel(String? status, {String? role}) {
+  final r = role?.toUpperCase();
+  if (status == 'ONGOING') {
+    if (r == 'TEACHER') return 'Đang dạy';
+    if (r == 'STUDENT') return 'Đang học';
+    return 'Đang diễn ra';
+  }
+  return classStatus[status] ?? (status ?? '');
+}
 const payMethods = {'CASH': 'Tiền mặt', 'TRANSFER': 'Chuyển khoản', 'CARD': 'Thẻ'};
 
 List<(Object, String)> opts(Map<String, String> m) => [for (final e in m.entries) (e.key, e.value)];

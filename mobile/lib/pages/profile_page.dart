@@ -15,7 +15,7 @@ class _ProfilePageState extends State<ProfilePage> {
   late Future<dynamic> _f = Api.i.get('/auth/me');
   void _reload() => setState(() { _f = Api.i.get('/auth/me'); });
 
-  static const _roleLabel = {'ADMIN': 'Quản trị', 'TEACHER': 'Giáo viên', 'STUDENT': 'Học viên'};
+  static const _roleLabel = {'ADMIN': 'Quản trị viên', 'TEACHER': 'Giảng viên', 'STUDENT': 'Học viên'};
 
   Future<void> _changePassword() async {
     final v = await showForm(context, 'Đổi mật khẩu', const [

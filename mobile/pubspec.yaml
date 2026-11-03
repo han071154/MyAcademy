@@ -9,10 +9,18 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  supabase_flutter: ^2.8.0
   dio: ^5.4.3
   shared_preferences: ^2.2.3
   intl: ^0.19.0
   google_fonts: ^6.2.1
+  file_picker: ^13.3.2
+  image_picker: ^1.2.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
 
 flutter:
   uses-material-design: true

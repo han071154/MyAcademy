@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api.dart';
 import 'pages/home_page.dart';
@@ -7,6 +8,10 @@ import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: 'https://epauixtqxgfwvcnhouio.supabase.co',
+    publishableKey: 'sb_publishable_0qebfckLPxT68_3QwyiSnQ_konncBtK',
+  );
   await Api.i.load();
   runApp(const CenterApp());
 }

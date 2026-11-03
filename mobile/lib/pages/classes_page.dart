@@ -39,7 +39,7 @@ class _ClassesPageState extends State<ClassesPage> {
             type: FieldType.dropdown,
             required: true,
             options: [for (final x in courses) (x['id'] as Object, '${x['name']}')]),
-        Field('teacher_id', 'Giáo viên',
+        Field('teacher_id', 'Giảng viên',
             type: FieldType.dropdown,
             options: [for (final x in teachers) (x['id'] as Object, '${x['full_name']}')]),
         const Field('start_date', 'Ngày bắt đầu', type: FieldType.date),
@@ -74,7 +74,7 @@ class _ClassesPageState extends State<ClassesPage> {
           onRetry: _reload,
           builder: (data) {
             final list = data as List;
-            if (list.isEmpty) return const EmptyState('Chưa có lớp học');
+            if (list.isEmpty) return EmptyState(widget.mine ? 'Chưa có lớp dạy nào' : 'Chưa có lớp học');
             return RefreshIndicator(
               onRefresh: () async {
                 _reload();
@@ -108,7 +108,7 @@ class _ClassesPageState extends State<ClassesPage> {
                       ),
                       const SizedBox(width: 8),
                       Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                        Pill(classStatus[c['status']] ?? '${c['status']}', statusColor(c['status'])),
+                        Pill(classStatusLabel(c['status'], role: Api.i.role), statusColor(c['status'])),
                         if (_admin)
                           PopupMenuButton<String>(
                             onSelected: (s) => s == 'edit' ? _edit(c) : _delete(c),
