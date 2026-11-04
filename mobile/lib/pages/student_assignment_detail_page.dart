@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -96,45 +95,7 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
     }
   }
 
-  Widget _previewWidget(String? url, String? name) {
-    if (url == null || url.isEmpty) return const SizedBox.shrink();
-
-    final isBase64 = url.startsWith('data:image');
-    final isNetworkImage = url.startsWith('http') && (url.contains('.png') || url.contains('.jpg') || url.contains('.jpeg') || url.contains('.webp'));
-
-    if (isBase64) {
-      final base64Data = url.substring(url.indexOf(',') + 1);
-      final bytes = base64Decode(base64Data);
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Image.memory(bytes, height: 220, fit: BoxFit.cover),
-      );
-    }
-
-    if (isNetworkImage) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Image.network(url, height: 220, fit: BoxFit.cover),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Row(children: [
-        const Icon(Icons.insert_drive_file_outlined, color: AppColors.primary, size: 28),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(name ?? 'Tệp đính kèm',
-              maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-        ),
-      ]),
-    );
-  }
+  Widget _previewWidget(String? url, String? name) => FilePreview(url: url, name: name, height: 220);
 
   @override
   Widget build(BuildContext context) {

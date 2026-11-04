@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+import 'api.dart';
 import 'theme.dart';
 
 // ---------- Định dạng ----------
@@ -430,3 +433,86 @@ TabBar styledTabs(List<String> labels) => TabBar(
       labelStyle: const TextStyle(fontWeight: FontWeight.w700),
       tabs: [for (final l in labels) Tab(text: l)],
     );
+
+// ---------- Xem tệp đính kèm / bài nộp (bucket private → signed URL) ----------
+bool _isImageName(String? s) {
+  final n = (s ?? '').toLowerCase().split('?').first;
+  return n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.webp') || n.endsWith('.gif');
+}
+
+class FilePreview extends StatefulWidget {
+  final String? url;
+  final String? name;
+  final double height;
+  const FilePreview({super.key, required this.url, this.name, this.height = 220});
+  @override
+  State<FilePreview> createState() => _FilePreviewState();
+}
+
+class _FilePreviewState extends State<FilePreview> {
+  Future<String>? _resolved;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(FilePreview old) {
+    super.didUpdateWidget(old);
+    if (old.url != widget.url) _resolve();
+  }
+
+  void _resolve() {
+    final u = widget.url;
+    _resolved = (u == null || u.isEmpty || u.startsWith('data:')) ? null : Api.i.fileUrl(u);
+  }
+
+  Widget _fileCard() => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Row(children: [
+          const Icon(Icons.insert_drive_file_outlined, color: AppColors.primary, size: 28),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(widget.name ?? 'Tệp đính kèm',
+                maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ]),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final u = widget.url;
+    if (u == null || u.isEmpty) return const SizedBox.shrink();
+
+    if (u.startsWith('data:image')) {
+      final bytes = base64Decode(u.substring(u.indexOf(',') + 1));
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Image.memory(bytes, height: widget.height, fit: BoxFit.cover),
+      );
+    }
+    if (!_isImageName(widget.name) && !_isImageName(u)) return _fileCard();
+
+    return FutureBuilder<String>(
+      future: _resolved,
+      builder: (_, s) {
+        if (s.hasError) return _fileCard();
+        if (!s.hasData) {
+          return SizedBox(height: widget.height, child: const Center(child: CircularProgressIndicator()));
+        }
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Image.network(s.data!,
+              height: widget.height, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fileCard()),
+        );
+      },
+    );
+  }
+}

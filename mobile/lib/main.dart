@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'api.dart';
 import 'pages/home_page.dart';
 import 'pages/login_page.dart';
+import 'pages/password_pages.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -25,9 +26,13 @@ class CenterApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
         // Đăng nhập/đăng xuất (kể cả token hết hạn) tự chuyển màn hình.
-        home: ValueListenableBuilder<bool>(
-          valueListenable: Api.i.loggedIn,
-          builder: (_, ok, __) => ok ? const HomePage() : const LoginPage(),
+        home: ListenableBuilder(
+          listenable: Listenable.merge([Api.i.loggedIn, Api.i.mustChangePassword]),
+          builder: (_, __) {
+            if (!Api.i.loggedIn.value) return const LoginPage();
+            if (Api.i.mustChangePassword.value) return const ForceChangePasswordPage();
+            return const HomePage();
+          },
         ),
       );
 }

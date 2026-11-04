@@ -4,8 +4,27 @@ Flutter (`mobile/`) → Supabase Cloud (trực tiếp, không cần backend Java
 
 ## 1. Thiết lập Supabase (Chỉ làm 1 lần duy nhất)
 1. Mở project trên [supabase.com](https://supabase.com).
-2. Vào **SQL Editor** → Mở file `database/supabase_setup.sql`, dán toàn bộ nội dung và bấm **Run**.
-   *(File này sẽ cấu hình quyền, bảng `assignments`, `submissions`, các view thống kê, tạo sẵn tài khoản Admin `admin@center.com` / mật khẩu `123456`).*
+2. Vào **SQL Editor**:
+   - Cài mới: chạy `database/schema.sql`, sau đó chạy `database/supabase_setup.sql`.
+   - Đã có dữ liệu: chỉ chạy `database/supabase_setup.sql`. Tài khoản cũ được chuyển sang Supabase Auth và **giữ nguyên mật khẩu**.
+   - Chạy lại file này nhiều lần vẫn an toàn.
+3. Vào **Authentication → Sign In / Providers**:
+   - Tắt **Allow new users to sign up**: chỉ admin mới tạo được tài khoản.
+   - Đặt **Minimum password length** = 8.
+4. Vào **Authentication → Emails → Reset Password**: thêm mã `{{ .Token }}` vào nội dung email, ví dụ `Mã đặt lại mật khẩu của bạn: {{ .Token }}`. App dùng mã này cho chức năng *Quên mật khẩu*.
+5. Khi dùng thật, cấu hình **Custom SMTP** (Authentication → Emails → SMTP Settings). SMTP mặc định của Supabase chỉ gửi được tới email thành viên của project và giới hạn vài email mỗi giờ.
+
+Tài khoản Admin mặc định: `admin@center.com` / `123456`. Bạn **bắt buộc phải đổi mật khẩu ở lần đăng nhập đầu**.
+
+### Bảo mật & phân quyền
+- Đăng nhập bằng **Supabase Auth**. Mật khẩu chỉ nằm trong `auth.users` (đã băm), bảng `users` không còn cột mật khẩu.
+- Mọi bảng đều bật **RLS**. Khách chưa đăng nhập (anon) không đọc hay ghi được gì. Quyền theo vai trò được kiểm tra ở server:
+  - Admin: toàn quyền.
+  - Giảng viên: chỉ xem lớp mình dạy, điểm danh, giao bài và chấm bài lớp đó. Không sửa được khóa học hay học phí.
+  - Học viên: chỉ xem lớp, điểm danh, học phí, bài nộp của mình. Không tự cho điểm được.
+- Các hàm RPC tự xác định người gọi theo phiên đăng nhập, không tin `user_id`/`role` gửi từ app.
+- Admin tạo tài khoản thì **phải nhập mật khẩu khởi tạo** (không còn mặc định `123456`). Người dùng bị bắt đổi mật khẩu ở lần đăng nhập đầu. Admin đặt lại mật khẩu cũng vậy.
+- Bucket `submissions` để **private**. Tệp chỉ xem được qua link tạm thời (signed URL, hết hạn sau 1 giờ), và chỉ người có quyền với bài tập hoặc bài nộp đó mới tạo được link.
 
 ## 2. Chạy ứng dụng Flutter
 Từ nay về sau, **bạn chỉ cần duy nhất 1 lệnh**:
@@ -39,7 +58,8 @@ flutter run
 
 ## 4. Cấu trúc mã nguồn
 ```
-database/supabase_setup.sql             Bảng assignments, submissions, views, RPC, RLS
+database/supabase_setup.sql             Supabase Auth, RLS, views, RPC, Storage policy
+mobile/lib/pages/password_pages.dart    Quên mật khẩu, bắt đổi mật khẩu lần đầu
 mobile/lib/api.dart                     Supabase Client API + File/Image Upload
 mobile/lib/pages/student_classes_page.dart         Danh sách lớp đã đăng ký của học viên
 mobile/lib/pages/student_class_space_page.dart     Không gian lớp (Bài tập, Điểm danh, Thông tin)
