@@ -18,9 +18,9 @@ class _ProfilePageState extends State<ProfilePage> {
   static const _roleLabel = {'ADMIN': 'Quản trị viên', 'TEACHER': 'Giảng viên', 'STUDENT': 'Học viên'};
 
   Future<void> _changePassword() async {
-    final v = await showForm(context, 'Đổi mật khẩu', const [
-      Field('old_password', 'Mật khẩu hiện tại', type: FieldType.password, required: true),
-      Field('new_password', 'Mật khẩu mới (≥ 6 ký tự)', type: FieldType.password, required: true),
+    final v = await showForm(context, 'Đổi mật khẩu', [
+      const Field('old_password', 'Mật khẩu hiện tại', type: FieldType.password, required: true),
+      Field('new_password', 'Mật khẩu mới (≥ ${Api.minPasswordLength} ký tự)', type: FieldType.password, required: true),
     ]);
     if (v == null || !mounted) return;
     if (await guard(context, () => Api.i.post('/auth/change-password', v)) && mounted) {

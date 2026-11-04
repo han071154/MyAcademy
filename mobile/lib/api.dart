@@ -14,10 +14,13 @@ class ApiException implements Exception {
 class Api {
   static final Api i = Api._();
 
+  /// Đã đăng nhập (có phiên Supabase Auth + hồ sơ trong bảng users).
   final ValueNotifier<bool> loggedIn = ValueNotifier(false);
+
+  /// Tài khoản đang dùng mật khẩu do admin cấp / mật khẩu mặc định → bắt đổi trước khi dùng app.
+  final ValueNotifier<bool> mustChangePassword = ValueNotifier(false);
   final ValueNotifier<int> changes = ValueNotifier(0);
 
-  String? token;
   Map<String, dynamic>? user;
 
   Api._();
@@ -27,46 +30,134 @@ class Api {
   String get role => (user?['role'] ?? '') as String;
   int? get userId => user?['id'] != null ? int.tryParse(user!['id'].toString()) : null;
 
+  static const _profileCols = 'id,email,full_name,role,phone,must_change_password';
+  static const minPasswordLength = 8;
+
+  /// Gọi 1 lần lúc mở app: khôi phục phiên đăng nhập do Supabase lưu sẵn.
   Future<void> load() async {
+    _sb.auth.onAuthStateChange.listen((data) {
+      // Phiên hết hạn / bị thu hồi → về màn hình đăng nhập.
+      if (data.event == AuthChangeEvent.signedOut) _clearLocal();
+    });
+
+    if (_sb.auth.currentSession == null) return;
     final p = await SharedPreferences.getInstance();
-    token = p.getString('token');
-    final u = p.getString('user');
-    if (u != null) {
-      try {
-        user = Map<String, dynamic>.from(jsonDecode(u));
-      } catch (_) {}
+    final cached = p.getString('user');
+    try {
+      await _loadProfile();
+    } catch (_) {
+      // Mất mạng lúc mở app: dùng tạm hồ sơ đã lưu, quyền vẫn do RLS phía server kiểm tra.
+      if (cached != null && _sb.auth.currentSession != null) {
+        try {
+          _setUser(Map<String, dynamic>.from(jsonDecode(cached)));
+        } catch (_) {}
+      }
     }
-    loggedIn.value = token != null && user != null;
   }
 
-  Future<void> login(String email, String password) async {
+  Future<void> _loadProfile() async {
+    final uid = _sb.auth.currentUser?.id;
+    if (uid == null) throw ApiException('Phiên đăng nhập không hợp lệ');
+    final row = await _sb.from('users').select(_profileCols).eq('auth_id', uid).eq('active', true).maybeSingle();
+    if (row == null) {
+      await _sb.auth.signOut();
+      throw ApiException('Tài khoản đã bị khóa hoặc chưa được cấp quyền');
+    }
+    _setUser(Map<String, dynamic>.from(row));
+    final p = await SharedPreferences.getInstance();
+    await p.setString('user', jsonEncode(user));
+  }
+
+  void _setUser(Map<String, dynamic> u) {
+    user = u;
+    mustChangePassword.value = u['must_change_password'] == true;
+    loggedIn.value = true;
+  }
+
+  Future<void> _clearLocal() async {
+    user = null;
+    mustChangePassword.value = false;
+    loggedIn.value = false;
+    final p = await SharedPreferences.getInstance();
+    await p.remove('user');
+    await p.remove('token');
+  }
+
+  String _authMessage(AuthException e) {
+    final m = e.message.toLowerCase();
+    if (m.contains('invalid login credentials')) return 'Sai email hoặc mật khẩu';
+    if (m.contains('banned')) return 'Tài khoản đã bị khóa';
+    if (m.contains('expired') || m.contains('otp') || m.contains('token')) {
+      return 'Mã xác nhận không đúng hoặc đã hết hạn';
+    }
+    if (m.contains('rate limit') || m.contains('security purposes')) {
+      return 'Bạn thao tác quá nhanh, vui lòng thử lại sau ít phút';
+    }
+    if (m.contains('should be different')) return 'Mật khẩu mới phải khác mật khẩu cũ';
+    if (m.contains('password')) return 'Mật khẩu không hợp lệ (tối thiểu $minPasswordLength ký tự)';
+    return e.message;
+  }
+
+  Future<T> _auth<T>(Future<T> Function() f) async {
     try {
-      final res = await _sb.rpc('login', params: {
-        'p_email': email,
-        'p_password': password,
-      });
-      final map = Map<String, dynamic>.from(_unwrap(res));
-      token = map['token'] as String? ?? 'active';
-      user = Map<String, dynamic>.from(map['user']);
-      final p = await SharedPreferences.getInstance();
-      await p.setString('token', token!);
-      await p.setString('user', jsonEncode(user));
-      loggedIn.value = true;
+      return await f();
+    } on AuthException catch (e) {
+      throw ApiException(_authMessage(e));
     } on PostgrestException catch (e) {
       throw ApiException(e.message);
+    } on ApiException {
+      rethrow;
     } catch (e) {
       throw ApiException(e.toString().replaceAll('Exception: ', ''));
     }
   }
 
-  Future<void> logout() async {
-    token = null;
-    user = null;
-    final p = await SharedPreferences.getInstance();
-    await p.remove('token');
-    await p.remove('user');
-    loggedIn.value = false;
+  void _checkNewPassword(String pw) {
+    if (pw.length < minPasswordLength) {
+      throw ApiException('Mật khẩu mới tối thiểu $minPasswordLength ký tự');
+    }
   }
+
+  Future<void> login(String email, String password) => _auth(() async {
+        await _sb.auth.signInWithPassword(email: email.trim().toLowerCase(), password: password);
+        await _loadProfile();
+      });
+
+  Future<void> logout() async {
+    try {
+      await _sb.auth.signOut();
+    } catch (_) {}
+    await _clearLocal();
+  }
+
+  /// Đổi mật khẩu khi đang đăng nhập. [oldPassword] = null khi bị bắt đổi ở lần đăng nhập đầu.
+  Future<void> changePassword(String? oldPassword, String newPassword) => _auth(() async {
+        _checkNewPassword(newPassword);
+        if (oldPassword != null) {
+          try {
+            await _sb.auth.signInWithPassword(email: user!['email'] as String, password: oldPassword);
+          } on AuthException {
+            throw ApiException('Mật khẩu hiện tại không đúng');
+          }
+        }
+        await _sb.auth.updateUser(UserAttributes(password: newPassword));
+        await _sb.rpc('password_changed');
+        user?['must_change_password'] = false;
+        mustChangePassword.value = false;
+      });
+
+  /// Quên mật khẩu bước 1: Supabase gửi mã xác nhận về email.
+  Future<void> sendResetCode(String email) =>
+      _auth(() => _sb.auth.resetPasswordForEmail(email.trim().toLowerCase()));
+
+  /// Quên mật khẩu bước 2: nhập mã trong email + mật khẩu mới, xong thì đăng nhập luôn.
+  Future<void> resetPasswordWithCode(String email, String code, String newPassword) => _auth(() async {
+        _checkNewPassword(newPassword);
+        await _sb.auth.verifyOTP(type: OtpType.recovery, email: email.trim().toLowerCase(), token: code.trim());
+        await _sb.auth.updateUser(UserAttributes(password: newPassword));
+        await _sb.rpc('password_changed');
+        await _loadProfile();
+      });
 
   Map<String, dynamic> _clean(dynamic data) {
     if (data is! Map) return {};
@@ -137,10 +228,7 @@ class Api {
       return await _sb.from('v_classes').select().order('id', ascending: false);
     }
     if (path == '/my/classes') {
-      final res = await _sb.rpc('get_my_classes', params: {
-        'p_user_id': userId,
-        'p_role': role,
-      });
+      final res = await _sb.rpc('get_my_classes');
       return _unwrap(res);
     }
     if (path.startsWith('/classes/') && path.endsWith('/students')) {
@@ -158,10 +246,7 @@ class Api {
     }
     if (path.startsWith('/classes/') && path.endsWith('/my-attendance')) {
       final id = int.parse(path.split('/')[2]);
-      final res = await _sb.rpc('get_student_attendance', params: {
-        'p_class_id': id,
-        'p_student_id': userId,
-      });
+      final res = await _sb.rpc('get_student_attendance', params: {'p_class_id': id});
       return _unwrap(res);
     }
     if (path.startsWith('/classes/') && path.endsWith('/assignments')) {
@@ -241,13 +326,10 @@ class Api {
     }
     if (path.startsWith('/classes/') && path.endsWith('/enroll')) {
       final classId = int.parse(path.split('/')[2]);
-      final studentId = role == 'STUDENT'
-          ? userId
-          : (b['student_id'] != null ? int.parse(b['student_id'].toString()) : userId);
+      // Server tự xác định người đăng ký theo phiên đăng nhập; student_id chỉ dùng khi admin ghi danh hộ.
       final res = await _sb.rpc('enroll_student', params: {
         'p_class_id': classId,
-        'p_student_id': studentId,
-        'p_role': role,
+        'p_student_id': b['student_id'] != null ? int.parse(b['student_id'].toString()) : null,
       });
       return _unwrap(res);
     }
@@ -306,12 +388,8 @@ class Api {
 
     // /auth/change-password
     if (path == '/auth/change-password') {
-      final res = await _sb.rpc('change_password', params: {
-        'p_user_id': userId,
-        'p_old_password': b['old_password'],
-        'p_new_password': b['new_password'],
-      });
-      return _unwrap(res);
+      await changePassword(b['old_password']?.toString() ?? '', b['new_password']?.toString() ?? '');
+      return {'ok': true};
     }
 
     throw ApiException('Đường dẫn không hợp lệ: $path');
@@ -400,10 +478,7 @@ class Api {
     // /my/classes/{classId}
     if (path.startsWith('/my/classes/')) {
       final classId = int.parse(path.substring(12));
-      final res = await _sb.rpc('cancel_my_enrollment', params: {
-        'p_class_id': classId,
-        'p_student_id': userId,
-      });
+      final res = await _sb.rpc('cancel_my_enrollment', params: {'p_class_id': classId});
       return _unwrap(res);
     }
 
@@ -417,32 +492,42 @@ class Api {
     // /users/{id}
     if (path.startsWith('/users/')) {
       final id = int.parse(path.substring(7));
-      await _sb.from('users').delete().eq('id', id);
-      return;
+      return _unwrap(await _sb.rpc('delete_user', params: {'p_id': id}));
     }
 
     throw ApiException('Đường dẫn không hợp lệ: $path');
   }
 
-  Future<String> uploadFile(String fileName, Uint8List bytes, {String? mimeType}) async {
-    try {
-      final cleanName = fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
-      final path = '${DateTime.now().millisecondsSinceEpoch}_$cleanName';
-      await _sb.storage.from('submissions').uploadBinary(
-        path,
-        bytes,
-        fileOptions: FileOptions(contentType: mimeType, upsert: true),
-      );
-      return _sb.storage.from('submissions').getPublicUrl(path);
-    } catch (_) {
-      final mime = mimeType ??
-          (fileName.toLowerCase().endsWith('.png')
-              ? 'image/png'
-              : (fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg')
-                  ? 'image/jpeg'
-                  : (fileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream')));
-      final base64Str = base64Encode(bytes);
-      return 'data:$mime;base64,$base64Str';
-    }
+  /// Upload tệp vào bucket private. Trả về "storage:<đường dẫn>" để lưu vào DB;
+  /// khi hiển thị dùng [fileUrl] để lấy link tạm thời (signed URL).
+  Future<String> uploadFile(String fileName, Uint8List bytes, {String? mimeType}) => _auth(() async {
+        final uid = _sb.auth.currentUser?.id;
+        if (uid == null) throw ApiException('Bạn cần đăng nhập lại');
+        final cleanName = fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+        final path = '$uid/${DateTime.now().millisecondsSinceEpoch}_$cleanName';
+        await _sb.storage.from('submissions').uploadBinary(
+              path,
+              bytes,
+              fileOptions: FileOptions(contentType: _guessMime(fileName, fallback: mimeType)),
+            );
+        return '$storagePrefix$path';
+      });
+
+  static const storagePrefix = 'storage:';
+
+  /// Link xem tệp: tệp trong bucket private → signed URL hết hạn sau 1 giờ.
+  /// Dữ liệu cũ (http / data:) giữ nguyên.
+  Future<String> fileUrl(String stored) async {
+    if (!stored.startsWith(storagePrefix)) return stored;
+    return _auth(() => _sb.storage.from('submissions').createSignedUrl(stored.substring(storagePrefix.length), 3600));
+  }
+
+  static String _guessMime(String name, {String? fallback}) {
+    final n = name.toLowerCase();
+    if (n.endsWith('.png')) return 'image/png';
+    if (n.endsWith('.jpg') || n.endsWith('.jpeg')) return 'image/jpeg';
+    if (n.endsWith('.webp')) return 'image/webp';
+    if (n.endsWith('.pdf')) return 'application/pdf';
+    return fallback ?? 'application/octet-stream';
   }
 }

@@ -35,20 +35,33 @@ class _UsersPageState extends State<UsersPage> {
         const Field('phone', 'Số điện thoại'),
         const Field('dob', 'Ngày sinh', type: FieldType.date),
         const Field('address', 'Địa chỉ'),
-        Field('password', u == null ? 'Mật khẩu (mặc định 123456)' : 'Mật khẩu mới (bỏ trống nếu không đổi)',
-            type: FieldType.password),
+        Field(
+            'password',
+            u == null
+                ? 'Mật khẩu khởi tạo (≥ ${Api.minPasswordLength} ký tự)'
+                : 'Đặt lại mật khẩu (bỏ trống nếu không đổi)',
+            type: FieldType.password,
+            required: u == null),
         if (u != null) const Field('active', 'Đang hoạt động', type: FieldType.check),
       ],
       initial: u == null ? null : Map<String, dynamic>.from(u),
     );
     if (v == null || !mounted) return;
+    final pw = v['password']?.toString() ?? '';
+    if ((u == null || pw.isNotEmpty) && pw.length < Api.minPasswordLength) {
+      toast(context, 'Mật khẩu tối thiểu ${Api.minPasswordLength} ký tự');
+      return;
+    }
     final ok = await guard(
       context,
       () => u == null
           ? Api.i.post('/users', {...v, 'role': widget.role})
           : Api.i.put('/users/${u['id']}', v),
     );
-    if (ok) _reload();
+    if (ok) {
+      if (pw.isNotEmpty && mounted) toast(context, 'Người dùng sẽ phải đổi mật khẩu ở lần đăng nhập tới');
+      _reload();
+    }
   }
 
   Future<void> _delete(Map u) async {

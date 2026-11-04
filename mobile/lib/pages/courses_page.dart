@@ -39,9 +39,14 @@ class _CoursesPageState extends State<CoursesPage> {
     if (await guard(context, () => Api.i.delete('/courses/${c['id']}'))) _reload();
   }
 
+  /// Chỉ admin được thêm/sửa/xóa; giảng viên, học viên chỉ xem (server cũng chặn bằng RLS).
+  bool get _canEdit => Api.i.role == 'ADMIN';
+
   @override
   Widget build(BuildContext context) => Scaffold(
-        floatingActionButton: FloatingActionButton(onPressed: () => _edit(), child: const Icon(Icons.add)),
+        floatingActionButton: _canEdit
+            ? FloatingActionButton(onPressed: () => _edit(), child: const Icon(Icons.add))
+            : null,
         body: Loader(
           future: _f,
           onRetry: _reload,
@@ -67,13 +72,15 @@ class _CoursesPageState extends State<CoursesPage> {
                           'Học phí: ${vnd(c['fee'])}',
                           style: const TextStyle(color: AppColors.muted)),
                       isThreeLine: true,
-                      trailing: PopupMenuButton<String>(
-                        onSelected: (s) => s == 'edit' ? _edit(c) : _delete(c),
-                        itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'edit', child: Text('Sửa')),
-                          PopupMenuItem(value: 'delete', child: Text('Xóa')),
-                        ],
-                      ),
+                      trailing: !_canEdit
+                          ? null
+                          : PopupMenuButton<String>(
+                              onSelected: (s) => s == 'edit' ? _edit(c) : _delete(c),
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(value: 'edit', child: Text('Sửa')),
+                                PopupMenuItem(value: 'delete', child: Text('Xóa')),
+                              ],
+                            ),
                     ),
                   );
                 },
