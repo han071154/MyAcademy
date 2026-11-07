@@ -1,6 +1,6 @@
 # Quản lý trung tâm ngoại ngữ
 
-Flutter (`mobile/`) → Supabase Cloud (trực tiếp, không cần backend Java)
+Flutter (`mobile/`) → Supabase Cloud (PostgreSQL + Auth + Storage), không cần server riêng
 
 ## 1. Thiết lập Supabase (Chỉ làm 1 lần duy nhất)
 1. Mở project trên [supabase.com](https://supabase.com).
@@ -32,7 +32,6 @@ Từ nay về sau, **bạn chỉ cần duy nhất 1 lệnh**:
 cd mobile
 flutter run
 ```
-- Không cần cài đặt hay chạy backend Spring Boot.
 - Không cần thiết lập biến môi trường phức tạp (`DB_URL`, `JWT_SECRET`,...).
 - Flutter tự kết nối trực tiếp đến Supabase qua internet.
 
