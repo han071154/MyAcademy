@@ -67,9 +67,16 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
     ]);
   }
 
+  static int _count(List classes, String status) => classes.where((c) => c['status'] == status).length;
+
+  /// Học viên đang theo học: chỉ tính lớp chưa kết thúc.
+  static int _currentStudents(List classes) => classes
+      .where((c) => c['status'] != 'CLOSED')
+      .fold<int>(0, (sum, c) => sum + ((c['enrolled'] as num?)?.toInt() ?? 0));
+
   Widget _heroCard(BuildContext context, List classes) {
-    final active = classes.where((c) => c['status'] == 'OPEN' || c['status'] == 'ONGOING').length;
-    final totalStudents = classes.fold<int>(0, (sum, c) => sum + ((c['enrolled'] as num?)?.toInt() ?? 0));
+    final ongoing = _count(classes, 'ONGOING');
+    final totalStudents = _currentStudents(classes);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -86,19 +93,27 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Row(children: [
-            Icon(Icons.workspace_premium_outlined, color: Colors.white70, size: 18),
-            SizedBox(width: 6),
-            Text('KHÔNG GIAN GIẢNG VIÊN',
-                style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-          ]),
+          const Expanded(
+            child: Row(children: [
+              Icon(Icons.workspace_premium_outlined, color: Colors.white70, size: 18),
+              SizedBox(width: 6),
+              Flexible(
+                child: Text('GIẢNG VIÊN',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: const Color(0x2EFFFFFF),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text('$active lớp hoạt động',
+            child: Text('$ongoing lớp đang dạy',
                 style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
           ),
         ]),
@@ -119,7 +134,7 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
           const SizedBox(width: 16),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Tổng số học viên', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              const Text('Học viên đang học', style: TextStyle(color: Colors.white70, fontSize: 13)),
               const SizedBox(height: 2),
               Text('$totalStudents học viên',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 18)),
@@ -214,7 +229,11 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('$value', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text('$value', maxLines: 1, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                ),
                 Text(label, maxLines: 2, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
               ]),
             ),
@@ -338,8 +357,10 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
           }
 
           final classes = (snap.data as List?) ?? [];
-          final active = classes.where((c) => c['status'] == 'OPEN' || c['status'] == 'ONGOING').length;
-          final totalStudents = classes.fold<int>(0, (sum, c) => sum + ((c['enrolled'] as num?)?.toInt() ?? 0));
+          final ongoing = _count(classes, 'ONGOING');
+          final upcoming = _count(classes, 'OPEN');
+          final closed = _count(classes, 'CLOSED');
+          final totalStudents = _currentStudents(classes);
 
           return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -352,15 +373,15 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
               _quickLinks(context, classes),
               const SizedBox(height: 16),
               Row(children: [
-                _stat(Icons.class_outlined, 'Lớp phụ trách', classes.length, AppColors.primary),
+                _stat(Icons.play_circle_outline, 'Đang giảng dạy', ongoing, AppColors.ok),
                 const SizedBox(width: 12),
-                _stat(Icons.groups_outlined, 'Tổng học viên', totalStudents, const Color(0xFF0D9488)),
+                _stat(Icons.event_available_outlined, 'Sắp khai giảng', upcoming, AppColors.primary),
               ]),
               const SizedBox(height: 12),
               Row(children: [
-                _stat(Icons.play_circle_outline, 'Đang giảng dạy', active, AppColors.ok),
+                _stat(Icons.task_alt_outlined, 'Đã kết thúc', closed, AppColors.amber),
                 const SizedBox(width: 12),
-                _stat(Icons.task_alt_outlined, 'Đã hoàn thành', classes.length - active, AppColors.amber),
+                _stat(Icons.groups_outlined, 'Học viên đang học', totalStudents, const Color(0xFF0D9488)),
               ]),
               const SizedBox(height: 24),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [

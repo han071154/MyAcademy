@@ -124,6 +124,14 @@ class _LoginPageState extends State<LoginPage> {
                                   builder: (_) => ForgotPasswordPage(initialEmail: _email.text.trim()))),
                       child: const Text('Quên mật khẩu?'),
                     ),
+                    const Divider(height: 24),
+                    OutlinedButton.icon(
+                      onPressed: _loading
+                          ? null
+                          : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterPage())),
+                      icon: const Icon(Icons.person_add_alt_1_outlined),
+                      label: const Text('Học viên mới? Đăng ký tài khoản'),
+                    ),
                   ]),
                 ),
               ]),

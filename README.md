@@ -1,6 +1,6 @@
 # Quản lý trung tâm ngoại ngữ
 
-Flutter (`mobile/`) → Supabase Cloud (trực tiếp, không cần backend Java)
+Flutter (`mobile/`) → Supabase Cloud (PostgreSQL + Auth + Storage), không cần server riêng
 
 ## 1. Thiết lập Supabase (Chỉ làm 1 lần duy nhất)
 1. Mở project trên [supabase.com](https://supabase.com).
@@ -8,8 +8,13 @@ Flutter (`mobile/`) → Supabase Cloud (trực tiếp, không cần backend Java
    - Cài mới: chạy `database/schema.sql`, sau đó chạy `database/supabase_setup.sql`.
    - Đã có dữ liệu: chỉ chạy `database/supabase_setup.sql`. Tài khoản cũ được chuyển sang Supabase Auth và **giữ nguyên mật khẩu**.
    - Chạy lại file này nhiều lần vẫn an toàn.
+   - Sau đó chạy `database/student_signup.sql` để bật chức năng **học viên tự đăng ký**. Mỗi lần chạy lại `supabase_setup.sql` thì chạy lại file này.
+   - Tiếp theo chạy `database/student_rules.sql`: khóa nộp lại bài đã chấm, server tự ghi giờ nộp và chặn nộp sau hạn, mỗi khóa học chỉ đăng ký 1 lớp đang học. Chạy lại `supabase_setup.sql` thì cũng chạy lại file này.
+   - Cuối cùng chạy `database/payment_requests.sql`: học viên đóng học phí bằng chuyển khoản theo mã QR, admin xác nhận ở mục Học phí → tab *Chờ xác nhận*. Đổi tài khoản nhận tiền: thay ảnh `mobile/assets/images/payment_qr.png` và sửa `mobile/lib/payment_config.dart`.
+   - Dữ liệu cũ từ trước: chạy `database/fix_data.sql` (sau `student_rules.sql`) để đồng bộ trạng thái lớp, chuẩn hóa email/SĐT và liệt kê chỗ còn thiếu. Xem toàn bộ dữ liệu: `database/inspect_data.sql`.
+   - (Tùy chọn) chạy `database/demo_data.sql` để có dữ liệu mẫu đủ tình huống. Danh sách tài khoản demo nằm ở đầu file; mật khẩu tài khoản demo mới tạo là `Demo@1234`.
 3. Vào **Authentication → Sign In / Providers**:
-   - Tắt **Allow new users to sign up**: chỉ admin mới tạo được tài khoản.
+   - Tắt **Allow new users to sign up**. Học viên vẫn tự đăng ký được trong app qua hàm `register_student` (chỉ tạo được vai trò Học viên); tài khoản giảng viên do admin tạo.
    - Đặt **Minimum password length** = 8.
 4. Vào **Authentication → Emails → Reset Password**: thêm mã `{{ .Token }}` vào nội dung email, ví dụ `Mã đặt lại mật khẩu của bạn: {{ .Token }}`. App dùng mã này cho chức năng *Quên mật khẩu*.
 5. Khi dùng thật, cấu hình **Custom SMTP** (Authentication → Emails → SMTP Settings). SMTP mặc định của Supabase chỉ gửi được tới email thành viên của project và giới hạn vài email mỗi giờ.
@@ -32,7 +37,6 @@ Từ nay về sau, **bạn chỉ cần duy nhất 1 lệnh**:
 cd mobile
 flutter run
 ```
-- Không cần cài đặt hay chạy backend Spring Boot.
 - Không cần thiết lập biến môi trường phức tạp (`DB_URL`, `JWT_SECRET`,...).
 - Flutter tự kết nối trực tiếp đến Supabase qua internet.
 

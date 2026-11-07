@@ -104,7 +104,7 @@ class Api {
     } on AuthException catch (e) {
       throw ApiException(_authMessage(e));
     } on PostgrestException catch (e) {
-      throw ApiException(e.message);
+      throw ApiException(_dbMessage(e));
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -121,6 +121,77 @@ class Api {
   Future<void> login(String email, String password) => _auth(() async {
         await _sb.auth.signInWithPassword(email: email.trim().toLowerCase(), password: password);
         await _loadProfile();
+      });
+
+  /// Học viên tự đăng ký: server tạo tài khoản vai trò STUDENT, xong đăng nhập luôn.
+  Future<void> registerStudent({
+    required String fullName,
+    required String email,
+    required String password,
+    required String phone,
+    required DateTime dob,
+    required String address,
+  }) =>
+      _auth(() async {
+        _checkNewPassword(password);
+        await _sb.rpc('register_student', params: {
+          'p_email': email.trim().toLowerCase(),
+          'p_password': password,
+          'p_full_name': fullName.trim(),
+          'p_phone': phone.trim(),
+          'p_dob': dob.toIso8601String().substring(0, 10),
+          'p_address': address.trim(),
+        });
+        await _sb.auth.signInWithPassword(email: email.trim().toLowerCase(), password: password);
+        await _loadProfile();
+      });
+
+  /// Tự cập nhật hồ sơ (họ tên, SĐT, ngày sinh, địa chỉ). Email và vai trò không đổi được.
+  Future<void> updateMyProfile({
+    required String fullName,
+    required String phone,
+    required DateTime dob,
+    required String address,
+  }) =>
+      _auth(() async {
+        await _sb.rpc('update_my_profile', params: {
+          'p_full_name': fullName.trim(),
+          'p_phone': phone.trim(),
+          'p_dob': dob.toIso8601String().substring(0, 10),
+          'p_address': address.trim(),
+        });
+        await _loadProfile(); // tên mới hiện ngay ở trang chủ
+        changes.value++;
+      });
+
+  // ---------- Đóng học phí bằng chuyển khoản (database/payment_requests.sql) ----------
+
+  /// Yêu cầu đóng tiền: học viên chỉ thấy của mình, admin thấy tất cả (RLS).
+  Future<List> paymentRequests({String? status}) => _auth(() async {
+        var q = _sb.from('v_payment_requests').select();
+        if (status != null) q = q.eq('status', status);
+        return await q.order('created_at', ascending: false) as List;
+      });
+
+  /// Học viên báo đã chuyển khoản cho lớp [classId]. Chờ admin xác nhận mới tính tiền.
+  Future<void> createPaymentRequest(int classId, num amount) => _auth(() async {
+        await _sb.rpc('create_payment_request', params: {'p_class_id': classId, 'p_amount': amount});
+        changes.value++;
+      });
+
+  Future<void> cancelPaymentRequest(int id) => _auth(() async {
+        await _sb.rpc('cancel_payment_request', params: {'p_id': id});
+        changes.value++;
+      });
+
+  Future<void> confirmPaymentRequest(int id) => _auth(() async {
+        await _sb.rpc('confirm_payment_request', params: {'p_id': id});
+        changes.value++;
+      });
+
+  Future<void> rejectPaymentRequest(int id, String? reason) => _auth(() async {
+        await _sb.rpc('reject_payment_request', params: {'p_id': id, 'p_reason': reason});
+        changes.value++;
       });
 
   Future<void> logout() async {
@@ -203,11 +274,34 @@ class Api {
     return r;
   }
 
+  DateTime? _lastClassSync;
+
+  /// Cập nhật trạng thái lớp theo ngày (Mở → Đang học → Kết thúc) trước khi hiện danh sách lớp.
+  /// Tối đa 10 phút 1 lần; lỗi (vd chưa chạy SQL mới) thì bỏ qua, không chặn việc xem lớp.
+  Future<void> _syncClassStatus() async {
+    final now = DateTime.now();
+    if (_lastClassSync != null && now.difference(_lastClassSync!) < const Duration(minutes: 10)) return;
+    _lastClassSync = now;
+    try {
+      await _sb.rpc('sync_class_status');
+    } catch (_) {}
+  }
+
+  /// Đổi lỗi kỹ thuật của database sang câu dễ hiểu.
+  static String _dbMessage(PostgrestException e) {
+    final m = e.message;
+    if (m.contains('users_phone_format')) return 'Số điện thoại không hợp lệ (10 số, bắt đầu bằng 0)';
+    if (m.contains('users_email_key') || m.contains('duplicate key') && m.contains('email')) {
+      return 'Email đã được sử dụng';
+    }
+    return m;
+  }
+
   Future<dynamic> _wrap(Future<dynamic> Function() f) async {
     try {
       return await f();
     } on PostgrestException catch (e) {
-      throw ApiException(e.message);
+      throw ApiException(_dbMessage(e));
     } catch (e) {
       throw ApiException(e.toString().replaceAll('Exception: ', ''));
     }
@@ -225,9 +319,11 @@ class Api {
 
     // 2. /classes
     if (path == '/classes') {
+      await _syncClassStatus();
       return await _sb.from('v_classes').select().order('id', ascending: false);
     }
     if (path == '/my/classes') {
+      await _syncClassStatus();
       final res = await _sb.rpc('get_my_classes');
       return _unwrap(res);
     }
@@ -262,6 +358,9 @@ class Api {
     if (path.startsWith('/assignments/') && path.endsWith('/submissions')) {
       final id = int.parse(path.split('/')[2]);
       return await _sb.from('v_submissions').select().eq('assignment_id', id).order('submitted_at', ascending: false);
+    }
+    if (path == '/my/submissions') {
+      return await _sb.from('submissions').select('id,assignment_id,score,submitted_at').eq('student_id', userId!);
     }
     if (path.startsWith('/assignments/') && path.endsWith('/my-submission')) {
       final id = int.parse(path.split('/')[2]);
@@ -305,7 +404,7 @@ class Api {
 
     // 7. /auth/me
     if (path == '/auth/me') {
-      return await _sb.from('users').select('id,email,full_name,role,phone').eq('id', userId!).single();
+      return await _sb.from('users').select('id,email,full_name,role,phone,dob,address').eq('id', userId!).single();
     }
 
     throw ApiException('Đường dẫn không hợp lệ: $path');
@@ -357,7 +456,7 @@ class Api {
         ...b,
         'assignment_id': assignmentId,
         'student_id': userId,
-        'submitted_at': DateTime.now().toIso8601String(),
+        // Giờ nộp do server ghi (trigger submissions_guard), không lấy giờ điện thoại.
       }, onConflict: 'assignment_id,student_id').select().single();
     }
 
@@ -423,7 +522,6 @@ class Api {
       return await _sb.from('submissions').update({
         'score': b['score'],
         'feedback': b['feedback'],
-        'graded_at': DateTime.now().toIso8601String(),
       }).eq('id', id).select().single();
     }
 

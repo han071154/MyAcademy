@@ -5,6 +5,7 @@ import '../theme.dart';
 import '../widgets.dart';
 import 'student_class_space_page.dart';
 import 'student_courses_page.dart';
+import 'student_pay_page.dart';
 
 class StudentClassesPage extends StatefulWidget {
   const StudentClassesPage({super.key});
@@ -85,6 +86,20 @@ class _StudentClassesPageState extends State<StudentClassesPage> {
             Icon(Icons.arrow_forward_ios, size: 12, color: AppColors.primary),
           ]),
         ]),
+        if (debt > 0) ...[
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () async {
+                await Navigator.push(context, MaterialPageRoute(builder: (_) => StudentPayPage(classData: c)));
+                _reload();
+              },
+              icon: const Icon(Icons.qr_code_2_rounded),
+              label: const Text('Đóng học phí'),
+            ),
+          ),
+        ],
       ]),
     );
   }

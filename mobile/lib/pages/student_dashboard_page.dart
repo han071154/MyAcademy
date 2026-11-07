@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import '../api.dart';
 import '../theme.dart';
 import '../widgets.dart';
+import 'schedule_page.dart';
 import 'student_class_space_page.dart';
+import 'student_courses_page.dart';
+import 'student_payments_page.dart';
 
 class StudentDashboardPage extends StatefulWidget {
   final void Function(int tabIndex)? onSelectTab;
@@ -71,7 +74,21 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
     ]);
   }
 
+  void _openPayments(BuildContext context) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const StudentPaymentsPage()));
+
+  void _openCourses(BuildContext context) => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Scaffold(appBar: AppBar(title: const Text('Đăng ký khóa học')), body: const StudentCoursesPage()),
+        ),
+      );
+
+  /// Lớp chưa kết thúc (đang mở đăng ký / đang học).
+  static int _activeCount(List classes) => classes.where((c) => c['status'] != 'CLOSED').length;
+
   Widget _heroCard(BuildContext context, List classes, num totalPaid, num totalDebt) {
+    final noClass = classes.isEmpty;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -87,28 +104,48 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          const Row(children: [
-            Icon(Icons.badge_outlined, color: Colors.white70, size: 18),
-            SizedBox(width: 6),
-            Text('THẺ HỌC VIÊN MYACADEMY',
-                style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
-          ]),
+          const Expanded(
+            child: Row(children: [
+              Icon(Icons.badge_outlined, color: Colors.white70, size: 18),
+              SizedBox(width: 6),
+              Flexible(
+                child: Text('THẺ HỌC VIÊN',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+              ),
+            ]),
+          ),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: const Color(0x2EFFFFFF),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(totalDebt > 0 ? 'Còn nợ học phí' : 'Đã nộp đủ',
+            child: Text(noClass ? 'Chưa có lớp' : (totalDebt > 0 ? 'Còn nợ' : 'Đã nộp đủ'),
                 style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
           ),
         ]),
         const SizedBox(height: 14),
-        if (totalDebt > 0) ...[
+        if (noClass) ...[
+          const Text('Tình trạng học phí', style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 4),
+          const Text('Bạn chưa đăng ký lớp nào',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 20)),
+        ] else if (totalDebt > 0) ...[
           const Text('Học phí còn nợ', style: TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 4),
           Text(vnd(totalDebt),
               style: const TextStyle(color: Color(0xFFFFD58A), fontWeight: FontWeight.w700, fontSize: 24)),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: () => _openPayments(context),
+            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF0F766E)),
+            icon: const Icon(Icons.qr_code_2_rounded, size: 20),
+            label: const Text('Đóng học phí ngay'),
+          ),
         ] else ...[
           const Text('Tình trạng học phí', style: TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 4),
@@ -125,7 +162,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Lớp đang học', style: TextStyle(color: Colors.white70, fontSize: 13)),
               const SizedBox(height: 2),
-              Text('${classes.length} lớp',
+              Text('${_activeCount(classes)} lớp',
                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 18)),
             ]),
           ),
@@ -141,89 +178,6 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
           ),
         ]),
       ]),
-    );
-  }
-
-  void _showTuitionDetails(BuildContext context, List classes) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Chi tiết học phí các lớp', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 14),
-            if (classes.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('Bạn chưa tham gia lớp học nào.', style: TextStyle(color: AppColors.muted)),
-              )
-            else
-              for (final c in classes) ...[
-                Builder(builder: (_) {
-                  final fee = num.tryParse('${c['fee']}') ?? 0;
-                  final paid = num.tryParse('${c['paid']}') ?? 0;
-                  final debt = fee - paid;
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade200),
-                    ),
-                    child: Row(children: [
-                      Expanded(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('${c['name']}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                          Text('Học phí gốc: ${vnd(fee)} • Đã đóng: ${vnd(paid)}',
-                              style: const TextStyle(color: AppColors.muted, fontSize: 12)),
-                        ]),
-                      ),
-                      Text(
-                        debt > 0 ? 'Nợ ${vnd(debt)}' : 'Đủ',
-                        style: TextStyle(
-                            color: debt > 0 ? AppColors.danger : AppColors.ok,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 13),
-                      ),
-                    ]),
-                  );
-                }),
-              ],
-          ]),
-        ),
-      ),
-    );
-  }
-
-  void _showSchedule(BuildContext context, List classes) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Thời khóa biểu của bạn', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 14),
-            if (classes.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text('Chưa có lịch học nào.', style: TextStyle(color: AppColors.muted)),
-              )
-            else
-              for (final c in classes)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const IconBox(Icons.calendar_today_outlined, AppColors.primary),
-                  title: Text('${c['name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                  subtitle: Text('${c['schedule'] ?? 'Chưa xếp lịch'} • Phòng: ${c['room'] ?? '—'}'),
-                ),
-          ]),
-        ),
-      ),
     );
   }
 
@@ -245,11 +199,12 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         );
 
     return Row(children: [
-      tile(Icons.add_shopping_cart_outlined, 'Đăng ký lớp', AppColors.primary, () => widget.onSelectTab?.call(1)),
+      tile(Icons.add_shopping_cart_outlined, 'Đăng ký lớp', AppColors.primary, () => _openCourses(context)),
       const SizedBox(width: 10),
-      tile(Icons.payments_outlined, 'Học phí', AppColors.ok, () => _showTuitionDetails(context, classes)),
+      tile(Icons.payments_outlined, 'Học phí', AppColors.ok,
+          () => _openPayments(context)),
       const SizedBox(width: 10),
-      tile(Icons.calendar_month_outlined, 'Lịch học', const Color(0xFF0F766E), () => _showSchedule(context, classes)),
+      tile(Icons.calendar_month_outlined, 'Lịch học', const Color(0xFF0F766E), () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SchedulePage()))),
       const SizedBox(width: 10),
       tile(Icons.person_outline, 'Hồ sơ', AppColors.amber, () => widget.onSelectTab?.call(2)),
     ]);
@@ -264,10 +219,12 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
             const SizedBox(width: 12),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('$value',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                // Số tiền dài (vd 2.000.000 đ) thì thu nhỏ chữ cho vừa, không bị cắt "2.000...."
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text('$value', maxLines: 1, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
                 Text(label, maxLines: 2, style: const TextStyle(color: AppColors.muted, fontSize: 13)),
               ]),
             ),
@@ -391,7 +348,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
               _quickLinks(context, classes),
               const SizedBox(height: 16),
               Row(children: [
-                _stat(Icons.school_outlined, 'Lớp đang học', classes.length, AppColors.primary),
+                _stat(Icons.school_outlined, 'Lớp đang học', _activeCount(classes), AppColors.primary),
                 const SizedBox(width: 12),
                 _stat(Icons.task_alt_outlined, 'Đã thanh toán', vnd(totalPaid), AppColors.ok),
               ]),
@@ -425,7 +382,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
                     ),
                     const SizedBox(height: 18),
                     FilledButton.icon(
-                      onPressed: () => widget.onSelectTab?.call(1),
+                      onPressed: () => _openCourses(context),
                       icon: const Icon(Icons.explore_outlined),
                       label: const Text('Khám phá khóa học ngay'),
                       style: FilledButton.styleFrom(

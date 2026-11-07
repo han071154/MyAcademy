@@ -73,8 +73,9 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
       }
 
       await Api.i.post('/assignments/${widget.assignment['id']}/submit', {
-        if (fileUrl != null) 'file_url': fileUrl,
-        if (fileName != null) 'file_name': fileName,
+        // Gửi cả khi null: nộp lại chỉ có chữ thì xóa tệp của lần nộp trước.
+        'file_url': fileUrl,
+        'file_name': fileName,
         'notes': _notesCtrl.text.trim(),
       });
 
@@ -95,6 +96,17 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
     }
   }
 
+  Widget _notice(IconData icon, Color color, String text) => Container(
+        margin: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: tint(color), borderRadius: BorderRadius.circular(12)),
+        child: Row(children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w600))),
+        ]),
+      );
+
   Widget _previewWidget(String? url, String? name) => FilePreview(url: url, name: name, height: 220);
 
   @override
@@ -111,9 +123,26 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
           if (snap.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
+          if (snap.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.cloud_off_outlined, size: 44, color: AppColors.danger),
+                  const SizedBox(height: 12),
+                  Text('Không tải được bài nộp của bạn:\n${snap.error}',
+                      textAlign: TextAlign.center, style: const TextStyle(color: AppColors.danger)),
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(onPressed: _reload, child: const Text('Thử lại')),
+                ]),
+              ),
+            );
+          }
 
           final submission = snap.data as Map?;
           final isGraded = submission != null && submission['score'] != null;
+          final submittedAt = submission == null ? null : DateTime.tryParse('${submission['submitted_at']}');
+          final isLate = due != null && submittedAt != null && submittedAt.isAfter(due);
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -137,7 +166,9 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
                           border: Border.all(color: isGraded ? const Color(0xFF93C5FD) : const Color(0xFF6EE7B7)),
                         ),
                         child: Text(
-                          isGraded ? 'Điểm: ${submission['score']}/10' : 'Đã nộp bài',
+                          isGraded
+                              ? 'Điểm: ${submission['score']}/10'
+                              : (isLate ? 'Nộp muộn' : 'Đã nộp bài'),
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
@@ -232,6 +263,10 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
                       Text('Nộp lúc: ${fmtDateTime(submission['submitted_at'])}',
                           style: const TextStyle(fontSize: 12, color: AppColors.muted)),
                     ]),
+                    if (isLate) ...[
+                      const SizedBox(height: 6),
+                      const Pill('Nộp muộn (sau hạn chót)', AppColors.danger),
+                    ],
                     if (submission['notes'] != null && submission['notes'].toString().isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Text('${submission['notes']}', style: const TextStyle(fontSize: 14)),
@@ -245,114 +280,139 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
                 const SizedBox(height: 20),
               ],
 
-              // Form nộp / nộp lại bài tập
-              Text(
-                submission == null ? 'Nộp bài tập' : 'Nộp lại bài tập (Ghi đè)',
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
-              ),
-              const SizedBox(height: 10),
-              SoftCard(
-                margin: EdgeInsets.zero,
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  TextField(
-                    controller: _notesCtrl,
-                    maxLines: 3,
-                    decoration: deco(
-                      labelText: 'Ghi chú / Câu trả lời bài tập',
-                      hintText: 'Nhập nội dung bài làm hoặc lời nhắn gửi giảng viên...',
-                    ),
+              // Bài đã chấm điểm thì khóa, không cho nộp lại.
+              if (isGraded)
+                _notice(Icons.lock_outline, AppColors.muted,
+                    'Bài tập đã được chấm điểm nên không thể nộp lại. Nếu cần, hãy liên hệ giảng viên.')
+              // Qua hạn nộp thì khóa, không cho nộp / nộp lại (server cũng chặn).
+              else if (isOverdue)
+                _notice(
+                    Icons.lock_clock_outlined,
+                    AppColors.danger,
+                    submission == null
+                        ? 'Đã hết hạn nộp bài lúc ${fmtDateTime(due.toIso8601String())}. Bạn không thể nộp nữa, '
+                            'nếu có lý do chính đáng hãy liên hệ giảng viên.'
+                        : 'Đã hết hạn nộp bài lúc ${fmtDateTime(due.toIso8601String())}, bài nộp ở trên là bài cuối cùng '
+                            'của bạn và không thể nộp lại.')
+              else ...[
+                // Form nộp / nộp lại bài tập
+                Text(
+                  submission == null ? 'Nộp bài tập' : 'Nộp lại bài tập',
+                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                ),
+                if (submission != null)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 4),
+                    child: Text('Bài nộp mới sẽ thay thế hoàn toàn bài nộp cũ (cả nội dung và tệp).',
+                        style: TextStyle(color: AppColors.muted, fontSize: 13)),
                   ),
-                  const SizedBox(height: 14),
+                if (due != null)
+                  _notice(Icons.schedule, AppColors.amber,
+                      'Hạn nộp: ${fmtDateTime(due.toIso8601String())}. Sau thời điểm này sẽ không nộp được nữa.'),
+                const SizedBox(height: 10),
+                SoftCard(
+                  margin: EdgeInsets.zero,
+                  padding: const EdgeInsets.all(16),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    TextField(
+                      controller: _notesCtrl,
+                      maxLines: 3,
+                      decoration: deco(
+                        labelText: 'Ghi chú / Câu trả lời bài tập',
+                        hintText: 'Nhập nội dung bài làm hoặc lời nhắn gửi giảng viên...',
+                      ),
+                    ),
+                    const SizedBox(height: 14),
 
-                  // Nút chọn đính kèm
-                  Row(children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => _pickImage(ImageSource.gallery),
-                        icon: const Icon(Icons.photo_library_outlined, size: 18),
-                        label: const Text('Chọn ảnh'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 11),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    // Nút chọn đính kèm
+                    Row(children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _pickImage(ImageSource.gallery),
+                          icon: const Icon(Icons.photo_library_outlined, size: 18),
+                          label: const Text('Chọn ảnh'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => _pickImage(ImageSource.camera),
-                        icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                        label: const Text('Chụp ảnh'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 11),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _pickImage(ImageSource.camera),
+                          icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                          label: const Text('Chụp ảnh'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: _pickFile,
-                        icon: const Icon(Icons.attach_file, size: 18),
-                        label: const Text('Tệp file'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 11),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _pickFile,
+                          icon: const Icon(Icons.attach_file, size: 18),
+                          label: const Text('Tệp file'),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ]),
+
+                    // Hiển thị tệp vừa chọn
+                    if (_pickedBytes != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: Row(children: [
+                          const Icon(Icons.check_circle, color: AppColors.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(_pickedName ?? 'Tệp đã chọn',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 18, color: AppColors.danger),
+                            onPressed: () => setState(() {
+                              _pickedBytes = null;
+                              _pickedName = null;
+                              _pickedMime = null;
+                            }),
+                          ),
+                        ]),
+                      ),
+                    ],
+
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _submitting ? null : _submit,
+                        icon: _submitting
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.send_rounded, size: 18),
+                        label: Text(_submitting ? 'Đang tải lên...' : (submission == null ? 'Nộp bài ngay' : 'Nộp lại bài tập')),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
                     ),
                   ]),
-
-                  // Hiển thị tệp vừa chọn
-                  if (_pickedBytes != null) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFEFF6FF),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFBFDBFE)),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.check_circle, color: AppColors.primary, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(_pickedName ?? 'Tệp đã chọn',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, size: 18, color: AppColors.danger),
-                          onPressed: () => setState(() {
-                            _pickedBytes = null;
-                            _pickedName = null;
-                            _pickedMime = null;
-                          }),
-                        ),
-                      ]),
-                    ),
-                  ],
-
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _submitting ? null : _submit,
-                      icon: _submitting
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.send_rounded, size: 18),
-                      label: Text(_submitting ? 'Đang tải lên...' : (submission == null ? 'Nộp bài ngay' : 'Nộp lại bài tập')),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                    ),
-                  ),
-                ]),
-              ),
+                ),
+              ],
             ],
           );
         },

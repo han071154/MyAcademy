@@ -58,8 +58,11 @@ class _TeacherAssignmentGradingPageState extends State<TeacherAssignmentGradingP
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('Chấm bài: ${student['full_name']}',
                         style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18)),
-                    Text('Nộp lúc: ${fmtDateTime(submission['submitted_at'])}',
-                        style: const TextStyle(color: AppColors.muted, fontSize: 12)),
+                    Text(
+                        'Nộp lúc: ${fmtDateTime(submission['submitted_at'])}'
+                        '${submission['is_late'] == true ? ' • Nộp muộn' : ''}',
+                        style: TextStyle(
+                            color: submission['is_late'] == true ? AppColors.danger : AppColors.muted, fontSize: 12)),
                   ]),
                 ),
                 IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
@@ -251,8 +254,12 @@ class _TeacherAssignmentGradingPageState extends State<TeacherAssignmentGradingP
                             Text('${st['full_name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                             const SizedBox(height: 2),
                             if (isSubmitted)
-                              Text('Nộp lúc: ${fmtDateTime(sub['submitted_at'])}',
-                                  style: const TextStyle(color: AppColors.muted, fontSize: 12))
+                              Text(
+                                  'Nộp lúc: ${fmtDateTime(sub['submitted_at'])}'
+                                  '${sub['is_late'] == true ? ' • Nộp muộn' : ''}',
+                                  style: TextStyle(
+                                      color: sub['is_late'] == true ? AppColors.danger : AppColors.muted,
+                                      fontSize: 12))
                             else
                               const Text('Chưa nộp bài', style: TextStyle(color: AppColors.danger, fontSize: 12)),
                           ]),
