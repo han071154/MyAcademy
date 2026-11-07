@@ -12,6 +12,16 @@ import 'teacher_dashboard_page.dart';
 /// nội dung từng mục đổi theo vai trò đăng nhập.
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  /// Màn hình con (vd: sau khi đăng ký + đóng tiền) yêu cầu chuyển sang tab khác.
+  static final tabRequest = ValueNotifier<int?>(null);
+
+  /// Đóng hết các màn hình đang mở và về tab [index] (0 Trang chủ, 1 Lớp học, 2 Hồ sơ).
+  static void goToTab(BuildContext context, int index) {
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    tabRequest.value = index;
+  }
+
   @override
   State<HomePage> createState() => _HomePageState();
 }
@@ -29,6 +39,25 @@ class _HomePageState extends State<HomePage> {
 
   void _selectTab(int index) {
     if (mounted) setState(() => _tab = index);
+  }
+
+  void _onTabRequest() {
+    final t = HomePage.tabRequest.value;
+    if (t == null) return;
+    HomePage.tabRequest.value = null;
+    _selectTab(t);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    HomePage.tabRequest.addListener(_onTabRequest);
+  }
+
+  @override
+  void dispose() {
+    HomePage.tabRequest.removeListener(_onTabRequest);
+    super.dispose();
   }
 
   Widget _homeTab() {

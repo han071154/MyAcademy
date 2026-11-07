@@ -4,7 +4,7 @@ import '../api.dart';
 import '../theme.dart';
 import '../widgets.dart';
 
-/// Học phí: tab Công nợ (thu tiền) và tab Lịch sử thu.
+/// Học phí: tab Chờ xác nhận (học viên báo chuyển khoản), Công nợ (thu tiền) và Lịch sử thu.
 class PaymentsPage extends StatefulWidget {
   const PaymentsPage({super.key});
   @override
@@ -14,11 +14,89 @@ class PaymentsPage extends StatefulWidget {
 class _PaymentsPageState extends State<PaymentsPage> {
   late Future<dynamic> _debts = Api.i.get('/payments/debts');
   late Future<dynamic> _history = Api.i.get('/payments');
+  late Future<dynamic> _requests = Api.i.paymentRequests(status: 'PENDING');
 
   void _reload() => setState(() {
         _debts = Api.i.get('/payments/debts');
         _history = Api.i.get('/payments');
+        _requests = Api.i.paymentRequests(status: 'PENDING');
       });
+
+  Future<void> _confirmRequest(Map r) async {
+    if (!await confirm(context,
+        'Xác nhận đã nhận ${vnd(r['amount'])} từ ${r['student_name']}?\nNội dung CK: ${r['transfer_code']}')) {
+      return;
+    }
+    if (!mounted) return;
+    if (await guard(context, () => Api.i.confirmPaymentRequest(int.parse('${r['id']}')))) {
+      _reload();
+      if (mounted) toast(context, 'Đã xác nhận và ghi nhận khoản thu');
+    }
+  }
+
+  Future<void> _rejectRequest(Map r) async {
+    final v = await showForm(context, 'Từ chối chuyển khoản', [
+      const Field('reason', 'Lý do (vd: chưa nhận được tiền, sai số tiền)', required: true),
+    ]);
+    if (v == null || !mounted) return;
+    if (await guard(context, () => Api.i.rejectPaymentRequest(int.parse('${r['id']}'), v['reason']?.toString()))) {
+      _reload();
+    }
+  }
+
+  Widget _requestList() => Loader(
+        future: _requests,
+        onRetry: _reload,
+        builder: (data) {
+          final list = data as List;
+          if (list.isEmpty) return const EmptyState('Không có chuyển khoản nào chờ xác nhận');
+          return ListView.builder(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: list.length,
+            itemBuilder: (_, i) {
+              final r = list[i] as Map;
+              return SoftCard(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    InitialAvatar(r['student_name']),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${r['student_name']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                        Text('${r['class_name']}', style: const TextStyle(color: AppColors.muted)),
+                      ]),
+                    ),
+                    Text(vnd(r['amount']),
+                        style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.primary)),
+                  ]),
+                  const SizedBox(height: 8),
+                  Text('Nội dung CK: ${r['transfer_code']}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text('Báo lúc ${fmtDateTime(r['created_at'])}${r['student_phone'] == null ? '' : ' • SĐT ${r['student_phone']}'}',
+                      style: const TextStyle(color: AppColors.muted, fontSize: 13)),
+                  const SizedBox(height: 10),
+                  const Text('Kiểm tra tài khoản ngân hàng đã nhận đúng số tiền và nội dung rồi mới xác nhận.',
+                      style: TextStyle(color: AppColors.amber, fontSize: 12)),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => _rejectRequest(r),
+                        style: OutlinedButton.styleFrom(foregroundColor: AppColors.danger),
+                        child: const Text('Từ chối'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(onPressed: () => _confirmRequest(r), child: const Text('Đã nhận tiền')),
+                    ),
+                  ]),
+                ]),
+              );
+            },
+          );
+        },
+      );
 
   Future<void> _pay(Map d) async {
     final v = await showForm(
@@ -47,11 +125,12 @@ class _PaymentsPageState extends State<PaymentsPage> {
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
-        length: 2,
+        length: 3,
         child: Column(children: [
-          styledTabs(['Công nợ', 'Lịch sử thu']),
+          styledTabs(['Chờ xác nhận', 'Công nợ', 'Lịch sử thu']),
           Expanded(
             child: TabBarView(children: [
+              _requestList(),
               Loader(
                 future: _debts,
                 onRetry: _reload,
