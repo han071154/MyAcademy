@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'api.dart';
 import 'theme.dart';
@@ -123,8 +124,21 @@ class Field {
   final FieldType type;
   final List<(Object, String)> options;
   final bool required;
+
+  /// Kiểm tra thêm (định dạng, độ dài...). Chỉ chạy khi ô đã có nội dung; ô trống do [required] xử lý.
+  final String? Function(String?)? validator;
+  final TextInputType? keyboard;
+
+  /// Giới hạn chọn ngày cho ô [FieldType.date].
+  final DateTime? firstDate, lastDate;
   const Field(this.key, this.label,
-      {this.type = FieldType.text, this.options = const [], this.required = false});
+      {this.type = FieldType.text,
+      this.options = const [],
+      this.required = false,
+      this.validator,
+      this.keyboard,
+      this.firstDate,
+      this.lastDate});
 }
 
 /// Hiện form thêm/sửa. Trả về Map giá trị (trường bỏ trống = null) hoặc null nếu hủy.
@@ -193,12 +207,14 @@ class _FormDialogState extends State<_FormDialog> {
   }
 
   Widget _input(Field f) {
-    String? Function(String?)? required =
-        f.required ? (v) => (v == null || v.trim().isEmpty) ? 'Bắt buộc' : null : null;
+    String? required(String? v) {
+      if (v == null || v.trim().isEmpty) return f.required ? 'Vui lòng nhập ${f.label.toLowerCase()}' : null;
+      return f.validator?.call(v);
+    }
     switch (f.type) {
       case FieldType.dropdown:
         return DropdownButtonFormField<Object>(
-          value: _val[f.key],
+          initialValue: _val[f.key],
           isExpanded: true,
           decoration: deco(labelText: f.label + (f.required ? ' *' : '')),
           items: [for (final o in f.options) DropdownMenuItem<Object>(value: o.$1, child: Text(o.$2))],
@@ -223,13 +239,16 @@ class _FormDialogState extends State<_FormDialog> {
           ),
           validator: required,
           onTap: () async {
-            final d = await showDatePicker(
-              context: context,
-              initialDate: DateTime.tryParse(c.text) ?? DateTime.now(),
-              firstDate: DateTime(1950),
-              lastDate: DateTime(2100),
-            );
-            if (d != null) c.text = DateFormat('yyyy-MM-dd').format(d);
+            final first = f.firstDate ?? DateTime(1950);
+            final last = f.lastDate ?? DateTime(2100);
+            var init = DateTime.tryParse(c.text) ?? DateTime.now();
+            if (init.isBefore(first)) init = first;
+            if (init.isAfter(last)) init = last;
+            final d = await showDatePicker(context: context, initialDate: init, firstDate: first, lastDate: last);
+            if (d != null) {
+              c.text = DateFormat('yyyy-MM-dd').format(d);
+              _key.currentState?.validate();
+            }
           },
         );
       case FieldType.number:
@@ -243,15 +262,26 @@ class _FormDialogState extends State<_FormDialog> {
           },
         );
       case FieldType.password:
+        final len = _ctl[f.key]!.text.length;
+        final ok = len >= Api.minPasswordLength;
         return TextFormField(
           controller: _ctl[f.key],
           obscureText: true,
-          decoration: deco(labelText: f.label + (f.required ? ' *' : '')),
+          onChanged: (_) => setState(() {}), // cập nhật bộ đếm ký tự
+          decoration: deco(labelText: f.label + (f.required ? ' *' : '')).copyWith(
+            helperText: len == 0
+                ? null
+                : ok
+                    ? 'Độ dài hợp lệ ✓'
+                    : 'Tối thiểu ${Api.minPasswordLength} ký tự ($len/${Api.minPasswordLength})',
+            helperStyle: TextStyle(color: ok ? AppColors.ok : AppColors.muted),
+          ),
           validator: required,
         );
       case FieldType.text:
         return TextFormField(
           controller: _ctl[f.key],
+          keyboardType: f.keyboard,
           decoration: deco(labelText: f.label + (f.required ? ' *' : '')),
           validator: required,
         );
@@ -269,6 +299,7 @@ class _FormDialogState extends State<_FormDialog> {
           child: SingleChildScrollView(
             child: Form(
               key: _key,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               child: Column(mainAxisSize: MainAxisSize.min, children: [
                 for (final f in widget.fields)
                   Padding(padding: const EdgeInsets.only(top: 8), child: _input(f)),
@@ -440,6 +471,10 @@ bool _isImageName(String? s) {
   return n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.webp') || n.endsWith('.gif');
 }
 
+/// Xem tệp đính kèm (đề bài / bài nộp).
+/// - Ảnh: hiện ảnh, bấm vào để phóng to.
+/// - Tệp khác (PDF, Word...): nút "Mở tệp" mở bằng trình duyệt / app xem tệp của điện thoại.
+/// - Không tải được: báo rõ lý do + nút "Thử lại" (trước đây lỗi bị giấu đi).
 class FilePreview extends StatefulWidget {
   final String? url;
   final String? name;
@@ -464,25 +499,75 @@ class _FilePreviewState extends State<FilePreview> {
     if (old.url != widget.url) _resolve();
   }
 
+  /// Tệp trong bucket private → xin link tạm thời (hết hạn sau 1 giờ).
   void _resolve() {
     final u = widget.url;
     _resolved = (u == null || u.isEmpty || u.startsWith('data:')) ? null : Api.i.fileUrl(u);
   }
 
-  Widget _fileCard() => Container(
-        padding: const EdgeInsets.all(12),
+  void _retry() => setState(_resolve);
+
+  bool get _isImage => _isImageName(widget.name) || _isImageName(widget.url);
+
+  Future<void> _open() async {
+    try {
+      // Xin link mới mỗi lần mở để không bị hết hạn.
+      final link = await Api.i.fileUrl(widget.url!);
+      final ok = await launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+      if (!ok && mounted) toast(context, 'Không tìm thấy ứng dụng để mở tệp này');
+    } catch (e) {
+      if (mounted) toast(context, 'Không mở được tệp: $e');
+    }
+  }
+
+  void _zoom(String link) => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => Scaffold(
+            backgroundColor: Colors.black,
+            appBar: AppBar(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              title: Text(widget.name ?? 'Ảnh', maxLines: 1, overflow: TextOverflow.ellipsis),
+              actions: [
+                IconButton(tooltip: 'Mở bằng ứng dụng khác', icon: const Icon(Icons.open_in_new), onPressed: _open),
+              ],
+            ),
+            body: Center(
+              child: InteractiveViewer(maxScale: 5, child: Image.network(link, fit: BoxFit.contain)),
+            ),
+          ),
+        ),
+      );
+
+  Widget _fileCard({String? error}) => Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
         decoration: BoxDecoration(
-          color: Colors.grey.shade100,
+          color: error == null ? Colors.grey.shade100 : tint(AppColors.danger),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey.shade300),
+          border: Border.all(color: error == null ? Colors.grey.shade300 : AppColors.danger.withAlpha(80)),
         ),
         child: Row(children: [
-          const Icon(Icons.insert_drive_file_outlined, color: AppColors.primary, size: 28),
+          Icon(error == null ? Icons.insert_drive_file_outlined : Icons.error_outline,
+              color: error == null ? AppColors.primary : AppColors.danger, size: 28),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(widget.name ?? 'Tệp đính kèm',
-                maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.name ?? 'Tệp đính kèm',
+                  maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+              if (error != null)
+                Text('Không tải được tệp: $error',
+                    maxLines: 3, style: const TextStyle(color: AppColors.danger, fontSize: 12)),
+            ]),
           ),
+          if (error != null)
+            TextButton(onPressed: _retry, child: const Text('Thử lại'))
+          else
+            TextButton.icon(
+              onPressed: _open,
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Mở tệp'),
+            ),
         ]),
       );
 
@@ -498,19 +583,46 @@ class _FilePreviewState extends State<FilePreview> {
         child: Image.memory(bytes, height: widget.height, fit: BoxFit.cover),
       );
     }
-    if (!_isImageName(widget.name) && !_isImageName(u)) return _fileCard();
+    if (!_isImage) return _fileCard();
 
     return FutureBuilder<String>(
       future: _resolved,
       builder: (_, s) {
-        if (s.hasError) return _fileCard();
+        if (s.hasError) return _fileCard(error: '${s.error}');
         if (!s.hasData) {
           return SizedBox(height: widget.height, child: const Center(child: CircularProgressIndicator()));
         }
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Image.network(s.data!,
-              height: widget.height, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fileCard()),
+        final link = s.data!;
+        return GestureDetector(
+          onTap: () => _zoom(link),
+          child: Stack(children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                link,
+                height: widget.height,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                loadingBuilder: (_, child, p) => p == null
+                    ? child
+                    : SizedBox(height: widget.height, child: const Center(child: CircularProgressIndicator())),
+                errorBuilder: (_, e, __) => _fileCard(error: 'ảnh bị lỗi hoặc link đã hết hạn'),
+              ),
+            ),
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12)),
+                child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.zoom_in, color: Colors.white, size: 16),
+                  SizedBox(width: 4),
+                  Text('Bấm để phóng to', style: TextStyle(color: Colors.white, fontSize: 12)),
+                ]),
+              ),
+            ),
+          ]),
         );
       },
     );

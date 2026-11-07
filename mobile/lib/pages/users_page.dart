@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api.dart';
 import '../theme.dart';
+import '../validators.dart';
 import '../widgets.dart';
 
 /// Danh sách + thêm/sửa/xóa học viên (role = STUDENT) hoặc giáo viên (role = TEACHER).
@@ -30,11 +31,11 @@ class _UsersPageState extends State<UsersPage> {
       context,
       u == null ? 'Thêm $_label' : 'Sửa $_label',
       [
-        const Field('full_name', 'Họ tên', required: true),
-        const Field('email', 'Email', required: true),
-        const Field('phone', 'Số điện thoại'),
-        const Field('dob', 'Ngày sinh', type: FieldType.date),
-        const Field('address', 'Địa chỉ'),
+        const Field('full_name', 'Họ tên', required: true, validator: V.name),
+        const Field('email', 'Email', required: true, validator: V.email, keyboard: TextInputType.emailAddress),
+        const Field('phone', 'Số điện thoại', required: true, validator: V.phone, keyboard: TextInputType.phone),
+        Field('dob', 'Ngày sinh', type: FieldType.date, required: true, firstDate: DateTime(1900), lastDate: V.latestDob),
+        const Field('address', 'Địa chỉ', required: true, validator: V.address),
         Field(
             'password',
             u == null
@@ -47,6 +48,7 @@ class _UsersPageState extends State<UsersPage> {
       initial: u == null ? null : Map<String, dynamic>.from(u),
     );
     if (v == null || !mounted) return;
+    if (v['phone'] != null) v['phone'] = V.cleanPhone('${v['phone']}');
     final pw = v['password']?.toString() ?? '';
     if ((u == null || pw.isNotEmpty) && pw.length < Api.minPasswordLength) {
       toast(context, 'Mật khẩu tối thiểu ${Api.minPasswordLength} ký tự');
