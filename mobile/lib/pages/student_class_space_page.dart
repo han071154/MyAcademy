@@ -19,7 +19,21 @@ class _StudentClassSpacePageState extends State<StudentClassSpacePage> {
 
   int get _classId => (widget.classData['id'] as num).toInt();
 
-  Future<dynamic> _loadAssignments() => Api.i.get('/classes/$_classId/assignments');
+  /// Bài tập của lớp + bài nộp của tôi (để hiện trạng thái từng bài).
+  Future<dynamic> _loadAssignments() async {
+    final r = await Future.wait([Api.i.get('/classes/$_classId/assignments'), Api.i.get('/my/submissions')]);
+    final mine = {for (final x in (r[1] as List)) '${x['assignment_id']}': x};
+    return [for (final a in (r[0] as List)) {...(a as Map), '_sub': mine['${a['id']}']}];
+  }
+
+  Widget _statusPill(Map a, bool isOverdue) {
+    final sub = a['_sub'] as Map?;
+    if (sub == null) {
+      return Pill(isOverdue ? 'Quá hạn' : 'Chưa nộp', isOverdue ? AppColors.danger : AppColors.amber);
+    }
+    if (sub['score'] != null) return Pill('Điểm ${sub['score']}', AppColors.ok);
+    return const Pill('Đã nộp • chờ chấm', AppColors.primary);
+  }
   Future<dynamic> _loadAttendance() => Api.i.get('/classes/$_classId/my-attendance');
 
   void _reloadAll() {
@@ -114,7 +128,7 @@ class _StudentClassSpacePageState extends State<StudentClassSpacePage> {
                           ),
                       ]),
                     ),
-                    const Icon(Icons.arrow_forward_ios, size: 14, color: AppColors.muted),
+                    _statusPill(a, isOverdue),
                   ]),
                   if (a['description'] != null && a['description'].toString().trim().isNotEmpty) ...[
                     const SizedBox(height: 8),
@@ -163,7 +177,8 @@ class _StudentClassSpacePageState extends State<StudentClassSpacePage> {
           final present = list.where((x) => x['status'] == 'PRESENT').length;
           final lateCount = list.where((x) => x['status'] == 'LATE').length;
           final absent = list.where((x) => x['status'] == 'ABSENT').length;
-          final rate = list.isNotEmpty ? (((present + lateCount) / list.length) * 100).toStringAsFixed(0) : '100';
+          // Chưa có buổi nào được điểm danh thì chưa có tỷ lệ (không hiện 100%).
+          final rate = list.isNotEmpty ? (((present + lateCount) / list.length) * 100).toStringAsFixed(0) : null;
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -189,7 +204,7 @@ class _StudentClassSpacePageState extends State<StudentClassSpacePage> {
                         color: Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Text('Tỷ lệ: $rate%',
+                      child: Text(rate == null ? 'Chưa có buổi học' : 'Tỷ lệ: $rate%',
                           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
                     ),
                   ]),
