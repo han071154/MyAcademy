@@ -4,6 +4,7 @@ import '../api.dart';
 import 'classes_page.dart';
 import 'dashboard_page.dart';
 import 'profile_page.dart';
+import 'schedule_page.dart';
 import 'student_classes_page.dart';
 import 'student_dashboard_page.dart';
 import 'teacher_dashboard_page.dart';
@@ -86,7 +87,17 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     final pages = [_homeTab(), _classesTab(), const ProfilePage()];
     return Scaffold(
-      appBar: AppBar(title: Text(_titles[_tab])),
+      appBar: AppBar(
+        title: Text(_titles[_tab]),
+        actions: [
+          if (_tab == 0 && Api.i.role == 'ADMIN')
+            IconButton(
+              tooltip: 'Lịch toàn trung tâm',
+              icon: const Icon(Icons.calendar_month_outlined),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SchedulePage())),
+            ),
+        ],
+      ),
       body: IndexedStack(index: _tab, children: pages),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,

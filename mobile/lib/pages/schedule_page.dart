@@ -7,7 +7,7 @@ import '../widgets.dart';
 
 /// Thời khóa biểu theo tuần, xem được tuần trước / tuần sau (bấm mũi tên, vuốt ngang, hoặc chọn ngày).
 /// Mỗi ngày chỉ hiện buổi học thật sự diễn ra hôm đó (trong khoảng khai giảng → kết thúc của lớp).
-/// Dùng chung cho học viên và giảng viên (dữ liệu từ /my/classes).
+/// Học viên/giáo viên: lịch của riêng mình (/my/classes). Admin: lịch toàn trung tâm (/classes).
 class SchedulePage extends StatefulWidget {
   const SchedulePage({super.key});
   @override
@@ -21,8 +21,10 @@ class _Session {
 }
 
 class _SchedulePageState extends State<SchedulePage> {
-  late Future<dynamic> _f = Api.i.get('/my/classes');
-  void _reload() => setState(() => _f = Api.i.get('/my/classes'));
+  bool get _isAdmin => Api.i.role == 'ADMIN';
+  String get _endpoint => _isAdmin ? '/classes' : '/my/classes';
+  late Future<dynamic> _f = Api.i.get(_endpoint);
+  void _reload() => setState(() => _f = Api.i.get(_endpoint));
 
   static DateTime get _today => DateUtils.dateOnly(DateTime.now());
   static DateTime _mondayOf(DateTime d) => DateUtils.dateOnly(d).subtract(Duration(days: d.weekday - 1));
@@ -111,7 +113,7 @@ class _SchedulePageState extends State<SchedulePage> {
         const SizedBox(height: 2),
         Text(
           'Phòng ${x.cls['room'] ?? '—'}'
-          '${Api.i.role == 'STUDENT' && x.cls['teacher_name'] != null ? ' • GV ${x.cls['teacher_name']}' : ''}',
+          '${(Api.i.role == 'STUDENT' || _isAdmin) && x.cls['teacher_name'] != null ? ' • GV ${x.cls['teacher_name']}' : ''}',
           style: const TextStyle(color: Colors.white70),
         ),
       ]),
@@ -189,7 +191,9 @@ class _SchedulePageState extends State<SchedulePage> {
               const SizedBox(height: 2),
               Text(
                 'Phòng ${c['room'] ?? '—'}'
-                '${Api.i.role == 'STUDENT' ? ' • GV ${c['teacher_name'] ?? 'chưa phân công'}' : ' • ${c['enrolled'] ?? 0} học viên'}',
+                '${_isAdmin
+                    ? ' • GV ${c['teacher_name'] ?? 'chưa phân công'} • ${c['enrolled'] ?? 0} học viên'
+                    : (Api.i.role == 'STUDENT' ? ' • GV ${c['teacher_name'] ?? 'chưa phân công'}' : ' • ${c['enrolled'] ?? 0} học viên')}',
                 style: const TextStyle(color: AppColors.muted, fontSize: 13),
               ),
               if (firstDay || lastDay || past) ...[
@@ -209,7 +213,8 @@ class _SchedulePageState extends State<SchedulePage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(Api.i.role == 'TEACHER' ? 'Lịch dạy' : 'Thời khóa biểu')),
+        appBar: AppBar(
+            title: Text(_isAdmin ? 'Lịch toàn trung tâm' : (Api.i.role == 'TEACHER' ? 'Lịch dạy' : 'Thời khóa biểu'))),
         body: Loader(
           future: _f,
           onRetry: _reload,
