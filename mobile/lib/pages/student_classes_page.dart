@@ -15,10 +15,22 @@ class StudentClassesPage extends StatefulWidget {
 }
 
 class _StudentClassesPageState extends State<StudentClassesPage> {
-  late Future<dynamic> _f = Api.i.get('/my/classes');
+  late Future<dynamic> _f = _load();
+
+  /// Các lần báo chuyển khoản, để đánh dấu lớp có khoản chuyển bị từ chối.
+  List _reqs = [];
+
+  Future<dynamic> _load() async {
+    final r = await Future.wait([
+      Api.i.get('/my/classes'),
+      Api.i.paymentRequests().catchError((_) => []),
+    ]);
+    _reqs = r[1] as List;
+    return r[0];
+  }
 
   void _reload() => setState(() {
-        _f = Api.i.get('/my/classes');
+        _f = _load();
       });
 
   void _onChanged() {
@@ -42,15 +54,13 @@ class _StudentClassesPageState extends State<StudentClassesPage> {
     final paid = num.tryParse('${c['paid']}') ?? 0;
     final debt = fee - paid;
     final dates = c['start_date'] == null ? null : '${fmtDate(c['start_date'])} → ${fmtDate(c['end_date'])}';
+    final rejected = debt > 0 ? latestRejectedRequest(_reqs, c['id']) : null;
 
     return SoftCard(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => StudentClassSpacePage(classData: c)),
-        );
+        await openStudentClass(context, c);
         _reload();
       },
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -80,12 +90,45 @@ class _StudentClassesPageState extends State<StudentClassesPage> {
               color: debt > 0 ? AppColors.danger : AppColors.ok,
             ),
           ),
-          const Row(children: [
-            Text('Vào lớp học', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13)),
-            SizedBox(width: 4),
-            Icon(Icons.arrow_forward_ios, size: 12, color: AppColors.primary),
-          ]),
+          canEnterClass(c)
+              ? const Row(children: [
+                  Text('Vào lớp học',
+                      style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13)),
+                  SizedBox(width: 4),
+                  Icon(Icons.arrow_forward_ios, size: 12, color: AppColors.primary),
+                ])
+              : const Row(children: [
+                  Icon(Icons.lock_outline_rounded, size: 14, color: AppColors.muted),
+                  SizedBox(width: 4),
+                  Text('Chưa mở lớp',
+                      style: TextStyle(color: AppColors.muted, fontWeight: FontWeight.w700, fontSize: 13)),
+                ]),
         ]),
+        if (rejected != null) ...[
+          const SizedBox(height: 8),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.cancel_rounded, size: 14, color: AppColors.danger),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                'Chuyển khoản ${vnd(rejected['amount'])} bị từ chối'
+                '${(rejected['reject_reason'] ?? '').toString().trim().isEmpty ? '' : ': ${rejected['reject_reason']}'}',
+                style: const TextStyle(color: AppColors.danger, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ]),
+        ],
+        if (paid <= 0 && c['hold_until'] != null) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            const Icon(Icons.timer_outlined, size: 14, color: AppColors.amber),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text('Giữ chỗ đến ${fmtDateTime(c['hold_until'])}, quá hạn chưa đóng sẽ tự hủy',
+                  style: const TextStyle(color: AppColors.amber, fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+          ]),
+        ],
         if (debt > 0) ...[
           const SizedBox(height: 10),
           SizedBox(

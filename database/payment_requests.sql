@@ -50,13 +50,11 @@ join classes cl on cl.id = e.class_id;
 revoke all on v_payment_requests from anon;
 grant select on v_payment_requests to authenticated;
 
--- Còn nợ của 1 ghi danh (không tính yêu cầu đang chờ).
+-- Còn nợ của 1 ghi danh (không tính yêu cầu đang chờ). Học phí = học phí chốt lúc ghi danh.
 create or replace function _enrollment_debt(p_enrollment_id bigint) returns numeric
 language sql stable security definer set search_path = public as $$
-  select co.fee - coalesce((select sum(amount) from payments where enrollment_id = e.id), 0)
+  select e.fee - coalesce((select sum(amount) from payments where enrollment_id = e.id), 0)
   from enrollments e
-  join classes cl on cl.id = e.class_id
-  join courses co on co.id = cl.course_id
   where e.id = p_enrollment_id
 $$;
 
@@ -133,15 +131,25 @@ end;
 $$;
 
 -- Admin: từ chối (chưa nhận được tiền / sai số tiền).
+-- Học viên thấy trạng thái "Bị từ chối" kèm lý do trong app. Nếu đăng ký đang giữ chỗ (chưa đóng đồng nào)
+-- thì gia hạn giữ chỗ thêm 3 ngày tính từ lúc từ chối, để học viên kịp xem lý do và đóng lại,
+-- không bị hủy lớp ngay vì hạn giữ chỗ đã qua trong lúc chờ admin xử lý.
 create or replace function reject_payment_request(p_id bigint, p_reason text default null) returns json
 language plpgsql security definer set search_path = public as $$
+declare
+  v_eid bigint;
 begin
   perform _require_admin();
   update payment_requests
   set status = 'REJECTED', reject_reason = nullif(trim(coalesce(p_reason, '')), ''),
       reviewed_at = now(), reviewed_by = app_uid()
-  where id = p_id and status = 'PENDING';
+  where id = p_id and status = 'PENDING'
+  returning enrollment_id into v_eid;
   if not found then raise exception 'Yêu cầu không tồn tại hoặc đã được xử lý'; end if;
+
+  update enrollments e set hold_until = greatest(e.hold_until, now() + interval '3 days')
+  where e.id = v_eid and e.hold_until is not null
+    and not exists (select 1 from payments p where p.enrollment_id = e.id);
   return json_build_object('ok', true);
 end;
 $$;

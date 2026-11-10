@@ -6,6 +6,7 @@ import '../widgets.dart';
 import 'schedule_page.dart';
 import 'student_class_space_page.dart';
 import 'student_courses_page.dart';
+import 'student_pay_page.dart';
 import 'student_payments_page.dart';
 
 class StudentDashboardPage extends StatefulWidget {
@@ -21,7 +22,9 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
 
   Future<List<dynamic>> _load() => Future.wait([
         Api.i.get('/my/classes'),
-        Api.i.get('/courses'),
+        Api.i.get('/classes'),
+        // Các lần báo chuyển khoản (chờ xác nhận / bị từ chối...); lỗi (vd chưa chạy payment_requests.sql) thì coi như không có.
+        Api.i.paymentRequests().catchError((_) => []),
       ]);
 
   void _reload() => setState(() {
@@ -84,11 +87,82 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         ),
       );
 
-  /// Lớp chưa kết thúc (đang mở đăng ký / đang học).
-  static int _activeCount(List classes) => classes.where((c) => c['status'] != 'CLOSED').length;
+  /// Lớp đang học thật sự: đã khai giảng, chưa kết thúc và đã được vào lớp (đã đóng ít nhất 1 đợt).
+  /// Không tính lớp chưa khai giảng hay lớp còn khóa vì chưa đóng tiền.
+  static int _activeCount(List classes) =>
+      classes.where((c) => c['status'] == 'ONGOING' && canEnterClass(c as Map)).length;
 
-  Widget _heroCard(BuildContext context, List classes, num totalPaid, num totalDebt) {
+  /// Số khóa học đang tuyển sinh: có ít nhất 1 lớp còn nhận đăng ký (đang mở, chưa khai giảng).
+  static int _openCourseCount(List allClasses) {
+    final today = DateUtils.dateOnly(DateTime.now());
+    return allClasses
+        .where((c) {
+          final start = DateTime.tryParse('${c['start_date'] ?? ''}');
+          return c['status'] == 'OPEN' && (start == null || start.isAfter(today));
+        })
+        .map((c) => c['course_id'])
+        .toSet()
+        .length;
+  }
+
+  // Màu vàng hổ phách cho trạng thái "Chờ xác nhận" trên thẻ học viên.
+  static const _waitBg = Color(0xFFFFD58A);
+  static const _waitText = Color(0xFF7C4A03);
+
+  /// Khối nổi bật khi toàn bộ học phí còn lại đã báo chuyển khoản, đang chờ trung tâm xác nhận.
+  Widget _waitingBox(BuildContext context, num totalPending) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0x26FFD58A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _waitBg, width: 1.5),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: const BoxDecoration(color: _waitBg, shape: BoxShape.circle),
+              child: const Icon(Icons.hourglass_top_rounded, color: _waitText, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Học phí đang chờ xác nhận',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14)),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(vnd(totalPending),
+                      style: const TextStyle(color: _waitBg, fontWeight: FontWeight.w800, fontSize: 26)),
+                ),
+              ]),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          const Text(
+            'Bạn đã báo chuyển khoản. Học phí được tính và lớp được mở ngay khi trung tâm xác nhận đã nhận tiền.',
+            style: TextStyle(color: Colors.white, fontSize: 13, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () => _openPayments(context),
+              style: FilledButton.styleFrom(backgroundColor: _waitBg, foregroundColor: _waitText),
+              icon: const Icon(Icons.receipt_long_outlined, size: 20),
+              label: const Text('Xem trạng thái học phí', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ),
+        ]),
+      );
+
+  Widget _heroCard(BuildContext context, List classes, num totalPaid, num totalDebt, num totalPending) {
     final noClass = classes.isEmpty;
+    // Toàn bộ số nợ đã báo chuyển khoản, chỉ còn chờ trung tâm xác nhận.
+    final waiting = totalDebt > 0 && totalPending >= totalDebt;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -121,11 +195,19 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0x2EFFFFFF),
+              // Đang chờ xác nhận: nhãn màu vàng cho nổi bật trên nền xanh.
+              color: waiting ? _waitBg : const Color(0x2EFFFFFF),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Text(noClass ? 'Chưa có lớp' : (totalDebt > 0 ? 'Còn nợ' : 'Đã nộp đủ'),
-                style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              if (waiting) ...[
+                const Icon(Icons.hourglass_top_rounded, size: 14, color: _waitText),
+                const SizedBox(width: 4),
+              ],
+              Text(noClass ? 'Chưa có lớp' : (waiting ? 'Chờ xác nhận' : (totalDebt > 0 ? 'Còn nợ' : 'Đã nộp đủ')),
+                  style: TextStyle(
+                      color: waiting ? _waitText : Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+            ]),
           ),
         ]),
         const SizedBox(height: 14),
@@ -134,11 +216,18 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
           const SizedBox(height: 4),
           const Text('Bạn chưa đăng ký lớp nào',
               style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 20)),
+        ] else if (waiting) ...[
+          _waitingBox(context, totalPending),
         ] else if (totalDebt > 0) ...[
           const Text('Học phí còn nợ', style: TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 4),
           Text(vnd(totalDebt),
               style: const TextStyle(color: Color(0xFFFFD58A), fontWeight: FontWeight.w700, fontSize: 24)),
+          if (totalPending > 0) ...[
+            const SizedBox(height: 2),
+            Text('Trong đó ${vnd(totalPending)} đang chờ xác nhận',
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          ],
           const SizedBox(height: 10),
           FilledButton.icon(
             onPressed: () => _openPayments(context),
@@ -283,12 +372,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => StudentClassSpacePage(classData: c)),
-              );
-            },
+            onPressed: () => openStudentClass(context, c),
             icon: const Icon(Icons.info_outline, size: 18),
             label: const Text('Xem chi tiết lớp học'),
             style: OutlinedButton.styleFrom(
@@ -331,11 +415,21 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
 
           final results = snap.data as List<dynamic>;
           final classes = (results[0] as List?) ?? [];
-          final courses = (results[1] as List?) ?? [];
+          final allClasses = (results[1] as List?) ?? [];
+          final reqs = (results[2] as List?) ?? [];
 
           final totalFee = classes.fold<num>(0, (sum, c) => sum + (num.tryParse('${c['fee']}') ?? 0));
           final totalPaid = classes.fold<num>(0, (sum, c) => sum + (num.tryParse('${c['paid']}') ?? 0));
           final totalDebt = totalFee - totalPaid;
+          final totalPending = reqs
+              .where((r) => r['status'] == 'PENDING')
+              .fold<num>(0, (sum, r) => sum + (num.tryParse('${r['amount']}') ?? 0));
+          // Lớp còn nợ mà lần báo chuyển khoản gần nhất bị trung tâm từ chối → báo cho học viên.
+          final rejected = [
+            for (final c in classes)
+              if ((num.tryParse('${c['fee']}') ?? 0) - (num.tryParse('${c['paid']}') ?? 0) > 0)
+                if (latestRejectedRequest(reqs, c['id']) case final r?) (c as Map, r),
+          ];
 
           return ListView(
             physics: const AlwaysScrollableScrollPhysics(),
@@ -343,21 +437,20 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
             children: [
               _greeting(context),
               const SizedBox(height: 16),
-              _heroCard(context, classes, totalPaid, totalDebt),
+              _heroCard(context, classes, totalPaid, totalDebt, totalPending),
               const SizedBox(height: 16),
+              for (final (c, r) in rejected)
+                RejectedNotice(r, onPay: () async {
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => StudentPayPage(classData: c)));
+                  _reload();
+                }),
               _quickLinks(context, classes),
               const SizedBox(height: 16),
+              // Số tiền đã có ở thẻ học viên phía trên nên ở đây chỉ hiện số lớp / số khóa.
               Row(children: [
-                _stat(Icons.school_outlined, 'Lớp đang học', _activeCount(classes), AppColors.primary),
+                _stat(Icons.school_outlined, 'Lớp đã đăng ký', classes.length, AppColors.primary),
                 const SizedBox(width: 12),
-                _stat(Icons.task_alt_outlined, 'Đã thanh toán', vnd(totalPaid), AppColors.ok),
-              ]),
-              const SizedBox(height: 12),
-              Row(children: [
-                _stat(Icons.pending_actions_outlined, 'Học phí nợ', vnd(totalDebt),
-                    totalDebt > 0 ? AppColors.danger : AppColors.ok),
-                const SizedBox(width: 12),
-                _stat(Icons.menu_book_outlined, 'Khóa học mở', courses.length, AppColors.amber),
+                _stat(Icons.menu_book_outlined, 'Khóa đang tuyển sinh', _openCourseCount(allClasses), AppColors.amber),
               ]),
               const SizedBox(height: 24),
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [

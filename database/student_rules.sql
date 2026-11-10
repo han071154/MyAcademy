@@ -7,6 +7,10 @@
 --   3. Mỗi khóa học chỉ đăng ký 1 lớp đang mở / đang học.
 --   4. Trạng thái lớp tự đổi theo ngày: tới ngày khai giảng → Đang học,
 --      qua ngày kết thúc → Đã kết thúc. Lớp đã khai giảng thì không đăng ký / tự hủy được.
+--      Ngày tính theo giờ Việt Nam (app_today), không theo giờ UTC của server.
+--   5. Học viên tự đăng ký mà chưa đóng tiền chỉ được giữ chỗ 3 ngày
+--      (enrollments.hold_until). Hết hạn mà chưa có khoản thu, chưa báo chuyển khoản,
+--      chưa đi học thì tự hủy đăng ký để trả chỗ cho người khác.
 --
 -- Chạy SAU database/supabase_setup.sql (chạy lại file kia thì chạy lại file này).
 -- Chạy lại nhiều lần vẫn an toàn.
@@ -14,9 +18,18 @@
 
 begin;
 
+-- Ngày hôm nay theo giờ Việt Nam. Server Supabase chạy giờ UTC nên current_date
+-- chỉ sang ngày mới lúc 7h sáng giờ Việt Nam, lệch với ngày trên điện thoại.
+create or replace function app_today() returns date
+language sql stable set search_path = public as $$
+  select (now() at time zone 'Asia/Ho_Chi_Minh')::date
+$$;
+grant execute on function app_today() to authenticated;
+
 -- ---------------------------------------------------------------------
 -- 4. Tự cập nhật trạng thái lớp theo ngày khai giảng / kết thúc.
 --    Chỉ chuyển "tiến lên" (Mở → Đang học → Kết thúc), không mở lại lớp admin đã đóng.
+-- 5. Hủy các đăng ký giữ chỗ đã hết hạn mà chưa đóng tiền.
 --    Được gọi khi app tải danh sách lớp, khi đăng ký / hủy lớp, và chạy tự động mỗi đêm (nếu có pg_cron).
 -- ---------------------------------------------------------------------
 create or replace function sync_class_status() returns int
@@ -24,14 +37,29 @@ language plpgsql security definer set search_path = public as $$
 declare
   n1 int;
   n2 int;
+  n3 int;
+  v_unpaid_hold text := '
+    delete from enrollments e
+    where e.hold_until is not null and e.hold_until < now()
+      and not exists (select 1 from payments p where p.enrollment_id = e.id)
+      and not exists (select 1 from attendances a where a.enrollment_id = e.id)';
 begin
   update classes set status = 'CLOSED'
-  where status in ('OPEN', 'ONGOING') and end_date is not null and end_date < current_date;
+  where status in ('OPEN', 'ONGOING') and end_date is not null and end_date < app_today();
   get diagnostics n1 = row_count;
   update classes set status = 'ONGOING'
-  where status = 'OPEN' and start_date is not null and start_date <= current_date;
+  where status = 'OPEN' and start_date is not null and start_date <= app_today();
   get diagnostics n2 = row_count;
-  return n1 + n2;
+
+  -- Đang có chuyển khoản chờ xác nhận thì giữ lại, chờ admin xử lý.
+  -- Bảng payment_requests có thể chưa tạo (chưa chạy payment_requests.sql) nên kiểm tra động.
+  if to_regclass('public.payment_requests') is not null then
+    v_unpaid_hold := v_unpaid_hold || '
+      and not exists (select 1 from payment_requests r where r.enrollment_id = e.id and r.status = ''PENDING'')';
+  end if;
+  execute v_unpaid_hold;
+  get diagnostics n3 = row_count;
+  return n1 + n2 + n3;
 end;
 $$;
 revoke execute on function sync_class_status() from public, anon;
@@ -56,7 +84,7 @@ begin
   where e.class_id = p_class_id and e.student_id = app_uid();
 
   if v_eid is null then raise exception 'Bạn chưa đăng ký lớp này'; end if;
-  if v_status != 'OPEN' or (v_start is not null and v_start <= current_date) then
+  if v_status != 'OPEN' or (v_start is not null and v_start <= app_today()) then
     raise exception 'Lớp đã bắt đầu, vui lòng liên hệ trung tâm để hủy';
   end if;
   if v_paid or v_attended then
@@ -77,12 +105,13 @@ $$;
 revoke execute on function cancel_my_enrollment(bigint) from public, anon;
 grant execute on function cancel_my_enrollment(bigint) to authenticated;
 
--- Chạy tự động lúc 00:05 mỗi ngày nếu project đã bật extension pg_cron (không có thì bỏ qua).
+-- Chạy tự động phút thứ 5 mỗi giờ nếu project đã bật extension pg_cron (không có thì bỏ qua):
+-- lớp đổi trạng thái lúc 00:05 giờ Việt Nam, đăng ký giữ chỗ hết hạn được hủy trong vòng 1 giờ.
 do $$
 begin
   if exists (select 1 from pg_extension where extname = 'pg_cron') then
     perform cron.unschedule(jobid) from cron.job where jobname = 'myacademy_sync_class_status';
-    perform cron.schedule('myacademy_sync_class_status', '5 0 * * *', 'select public.sync_class_status()');
+    perform cron.schedule('myacademy_sync_class_status', '5 * * * *', 'select public.sync_class_status()');
   end if;
 exception when others then
   raise notice 'Không đặt được lịch pg_cron (%), app vẫn tự cập nhật khi mở danh sách lớp', sqlerrm;
@@ -193,7 +222,7 @@ begin
   if v_role = 'STUDENT' and v_class.status != 'OPEN' then
     raise exception 'Lớp không còn nhận đăng ký';
   end if;
-  if v_role = 'STUDENT' and v_class.start_date is not null and v_class.start_date <= current_date then
+  if v_role = 'STUDENT' and v_class.start_date is not null and v_class.start_date <= app_today() then
     raise exception 'Lớp đã khai giảng nên không nhận đăng ký thêm, vui lòng liên hệ trung tâm';
   end if;
   if exists (select 1 from enrollments where class_id = p_class_id and student_id = v_sid) then
@@ -219,13 +248,24 @@ begin
     raise exception 'Lớp đã đủ học viên';
   end if;
 
-  insert into enrollments (student_id, class_id) values (v_sid, p_class_id) returning * into v_new;
-  return json_build_object('id', v_new.id, 'student_id', v_new.student_id, 'class_id', v_new.class_id);
+  -- Học phí (enrollments.fee) do trigger chốt theo khóa học tại thời điểm này.
+  -- Học viên tự đăng ký lớp có thu phí: giữ chỗ 3 ngày, quá hạn chưa đóng thì sync_class_status() tự hủy.
+  -- Admin ghi danh hộ thì không giới hạn.
+  insert into enrollments (student_id, class_id, hold_until)
+  values (v_sid, p_class_id,
+          case when v_role = 'STUDENT' and (select fee from courses where id = v_class.course_id) > 0
+               then now() + interval '3 days' end)
+  returning * into v_new;
+  return json_build_object('id', v_new.id, 'student_id', v_new.student_id, 'class_id', v_new.class_id,
+                           'fee', v_new.fee, 'hold_until', v_new.hold_until);
 end;
 $$;
 
 revoke execute on function enroll_student(bigint, bigint) from public, anon;
 grant execute on function enroll_student(bigint, bigint) to authenticated;
 revoke execute on function submissions_guard() from public, anon, authenticated;
+
+-- Đăng ký đang giữ chỗ chưa đóng tiền: tìm nhanh khi dọn.
+create index if not exists enrollments_hold_idx on enrollments(hold_until) where hold_until is not null;
 
 commit;

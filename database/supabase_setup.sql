@@ -41,6 +41,30 @@ create table if not exists submissions (
   unique (assignment_id, student_id)
 );
 
+-- Học phí chốt tại lúc ghi danh: admin đổi học phí khóa học thì công nợ của học viên
+-- đã đăng ký vẫn giữ nguyên. Ghi danh cũ lấy theo học phí khóa học hiện tại.
+alter table enrollments add column if not exists fee numeric(12,0);
+-- Học viên tự đăng ký mà chưa đóng tiền thì chỉ được giữ chỗ tới thời điểm này (xem student_rules.sql).
+-- null = không hết hạn (admin ghi danh hộ, lớp miễn phí, dữ liệu cũ).
+alter table enrollments add column if not exists hold_until timestamptz;
+update enrollments e set fee = co.fee
+from classes cl join courses co on co.id = cl.course_id
+where e.fee is null and cl.id = e.class_id;
+alter table enrollments alter column fee set not null;
+
+create or replace function enrollments_set_fee() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.fee is null then
+    select co.fee into new.fee from classes cl join courses co on co.id = cl.course_id where cl.id = new.class_id;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_enrollments_set_fee on enrollments;
+create trigger trg_enrollments_set_fee before insert on enrollments
+  for each row execute function enrollments_set_fee();
+
 -- =====================================================================
 -- 2. Liên kết users <-> auth.users (Supabase Auth)
 -- =====================================================================
@@ -143,6 +167,20 @@ language sql stable security definer set search_path = public as $$
   select count(*)::int from submissions where assignment_id = p_assignment_id
 $$;
 
+-- Tên giảng viên để hiện trong danh sách lớp. Học viên không đọc trực tiếp bảng users của giảng viên
+-- (để không lộ email, SĐT, ngày sinh, địa chỉ), chỉ lấy được họ tên qua hàm này.
+create or replace function teacher_display_name(p_id bigint) returns text
+language sql stable security definer set search_path = public as $$
+  select full_name from users where id = p_id and role = 'TEACHER'
+$$;
+
+-- Tệp trong Storage đang được bài nộp / bài tập dùng thì không cho xóa (xem policy myacademy_delete).
+create or replace function storage_file_in_use(p_name text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from submissions where file_url = 'storage:' || p_name)
+      or exists (select 1 from assignments where attachment_url = 'storage:' || p_name)
+$$;
+
 -- =====================================================================
 -- 4. Bật RLS + phân quyền theo vai trò
 -- =====================================================================
@@ -161,13 +199,13 @@ revoke all on all sequences in schema public from anon;
 grant select, insert, update, delete on all tables in schema public to authenticated;
 grant usage, select on all sequences in schema public to authenticated;
 
--- users: xem chính mình, admin xem tất cả, ai cũng thấy giảng viên,
--- giảng viên thấy học viên trong lớp mình. Ghi chỉ qua RPC.
+-- users: xem chính mình, admin xem tất cả, giảng viên thấy học viên trong lớp mình.
+-- Tên giảng viên trong danh sách lớp lấy qua teacher_display_name(), không mở cả dòng users.
+-- Ghi chỉ qua RPC.
 drop policy if exists users_select on users;
 create policy users_select on users for select to authenticated using (
   auth_id = auth.uid()
   or is_admin()
-  or role = 'TEACHER'
   or exists (select 1 from enrollments e join classes c on c.id = e.class_id
              where e.student_id = users.id and c.teacher_id = app_uid())
 );
@@ -275,12 +313,11 @@ drop view if exists v_classes, v_enrollments, v_payments, v_debts, v_assignments
 
 create view v_classes with (security_invoker = true) as
 select cl.id, cl.course_id, co.name as course_name, co.fee,
-       cl.teacher_id, t.full_name as teacher_name,
+       cl.teacher_id, teacher_display_name(cl.teacher_id) as teacher_name,
        cl.name, cl.start_date, cl.end_date, cl.schedule, cl.room, cl.max_students, cl.status,
        class_student_count(cl.id) as enrolled
 from classes cl
-join courses co on co.id = cl.course_id
-left join users t on t.id = cl.teacher_id;
+join courses co on co.id = cl.course_id;
 
 create view v_enrollments with (security_invoker = true) as
 select e.id as enrollment_id, e.class_id, e.student_id, u.full_name, u.phone, u.email
@@ -296,15 +333,14 @@ join users u on u.id = e.student_id
 join classes cl on cl.id = e.class_id;
 
 create view v_debts with (security_invoker = true) as
-select e.id as enrollment_id, u.full_name as student_name, cl.name as class_name, co.fee,
+select e.id as enrollment_id, u.full_name as student_name, cl.name as class_name, e.fee,
        coalesce(sum(p.amount), 0) as paid,
-       co.fee - coalesce(sum(p.amount), 0) as debt
+       e.fee - coalesce(sum(p.amount), 0) as debt
 from enrollments e
 join users u on u.id = e.student_id
 join classes cl on cl.id = e.class_id
-join courses co on co.id = cl.course_id
 left join payments p on p.enrollment_id = e.id
-group by e.id, u.full_name, cl.name, co.fee;
+group by e.id, u.full_name, cl.name, e.fee;
 
 create view v_assignments with (security_invoker = true) as
 select a.id, a.class_id, a.teacher_id, a.title, a.description, a.due_date, a.attachment_url, a.attachment_name, a.created_at,
@@ -464,14 +500,18 @@ begin
       select * from v_classes where teacher_id = v_uid order by start_date desc nulls last
     ) x;
   elsif v_role = 'STUDENT' then
-    select json_agg(x) into r from (
-      select cl.*,
-             (select coalesce(sum(p.amount), 0)
-              from payments p join enrollments e on e.id = p.enrollment_id
-              where e.class_id = cl.id and e.student_id = v_uid) as paid
-      from v_classes cl
-      where cl.id in (select class_id from enrollments where student_id = v_uid)
-      order by cl.start_date desc nulls last
+    -- fee = học phí chốt lúc ghi danh (không phải học phí hiện tại của khóa học).
+    select json_agg(x.j order by x.start_date desc nulls last) into r from (
+      select cl.start_date,
+             to_jsonb(cl) || jsonb_build_object(
+               'enrollment_id', e.id,
+               'fee', e.fee,
+               'hold_until', e.hold_until,
+               'paid', (select coalesce(sum(p.amount), 0) from payments p where p.enrollment_id = e.id)
+             ) as j
+      from enrollments e
+      join v_classes cl on cl.id = e.class_id
+      where e.student_id = v_uid
     ) x;
   elsif v_role = 'ADMIN' then
     select json_agg(x) into r from (select * from v_classes order by id desc) x;
@@ -611,11 +651,9 @@ declare
 begin
   perform _require_admin();
   if p_amount <= 0 then raise exception 'Số tiền phải lớn hơn 0'; end if;
-  select co.fee - coalesce((select sum(amount) from payments where enrollment_id = e.id), 0)
+  select e.fee - coalesce((select sum(amount) from payments where enrollment_id = e.id), 0)
   into v_debt
   from enrollments e
-  join classes cl on cl.id = e.class_id
-  join courses co on co.id = cl.course_id
   where e.id = p_enrollment_id;
 
   if v_debt is null then raise exception 'Không tìm thấy thông tin ghi danh'; end if;
@@ -652,8 +690,7 @@ begin
     'total_revenue', v_revenue,
     'month_revenue', (select coalesce(sum(amount), 0) from payments
                       where date_trunc('month', paid_at) = date_trunc('month', now())),
-    'total_debt', (select coalesce(sum(co.fee), 0) from enrollments e
-                   join classes cl on cl.id = e.class_id join courses co on co.id = cl.course_id) - v_revenue,
+    'total_debt', (select coalesce(sum(fee), 0) from enrollments) - v_revenue,
     'monthly', coalesce(m, '[]'::json)
   );
 end;
@@ -664,6 +701,7 @@ revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
 revoke execute on function _create_auth_user(text, text, text) from authenticated;
 revoke execute on function submissions_guard() from authenticated;
+revoke execute on function enrollments_set_fee() from authenticated;
 alter default privileges in schema public revoke execute on functions from public, anon;
 
 -- =====================================================================
@@ -682,6 +720,7 @@ where file_url ~ '^https?://[^/]+/storage/v1/object/public/submissions/';
 
 drop policy if exists myacademy_upload on storage.objects;
 drop policy if exists myacademy_read on storage.objects;
+drop policy if exists myacademy_delete on storage.objects;
 
 -- Chỉ upload vào thư mục của chính mình.
 create policy myacademy_upload on storage.objects for insert to authenticated with check (
@@ -698,6 +737,15 @@ create policy myacademy_read on storage.objects for select to authenticated usin
     or exists (select 1 from public.assignments a where a.attachment_url = 'storage:' || name)
     or exists (select 1 from public.submissions s where s.file_url = 'storage:' || name)
   )
+);
+
+-- Xóa tệp của mình khi không còn bài nộp / bài tập nào dùng tới:
+-- dọn tệp đã upload nhưng nộp bài thất bại, và tệp cũ sau khi nộp lại.
+-- Tệp của bài đã nộp / đã chấm vẫn được giữ.
+create policy myacademy_delete on storage.objects for delete to authenticated using (
+  bucket_id = 'submissions'
+  and (storage.foldername(name))[1] = auth.uid()::text
+  and not public.storage_file_in_use(name)
 );
 
 -- =====================================================================

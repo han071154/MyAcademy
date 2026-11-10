@@ -6,10 +6,11 @@ class V {
   V._();
 
   static final _emailRe = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-  static final _phoneRe = RegExp(r'^(0|\+84)[0-9]{9}$');
+  static final _phoneRe = RegExp(r'^0[0-9]{9}$');
 
-  /// Bỏ khoảng trắng, dấu chấm, gạch ngang trong số điện thoại.
-  static String cleanPhone(String s) => s.replaceAll(RegExp(r'[\s.-]'), '');
+  /// Bỏ khoảng trắng, dấu chấm, gạch ngang và đổi "+84" đầu số thành "0"
+  /// (giống hàm normalize_phone phía server), vd "+84 912.345.678" → "0912345678".
+  static String cleanPhone(String s) => s.replaceAll(RegExp(r'[\s.-]'), '').replaceFirst(RegExp(r'^\+84'), '0');
 
   static String? required(String? v, String msg) => (v == null || v.trim().isEmpty) ? msg : null;
 

@@ -105,6 +105,8 @@ class Api {
       throw ApiException(_authMessage(e));
     } on PostgrestException catch (e) {
       throw ApiException(_dbMessage(e));
+    } on StorageException catch (e) {
+      throw ApiException(_storageMessage(e));
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -134,16 +136,36 @@ class Api {
   }) =>
       _auth(() async {
         _checkNewPassword(password);
-        await _sb.rpc('register_student', params: {
-          'p_email': email.trim().toLowerCase(),
-          'p_password': password,
-          'p_full_name': fullName.trim(),
-          'p_phone': phone.trim(),
-          'p_dob': dob.toIso8601String().substring(0, 10),
-          'p_address': address.trim(),
-        });
-        await _sb.auth.signInWithPassword(email: email.trim().toLowerCase(), password: password);
-        await _loadProfile();
+        final mail = email.trim().toLowerCase();
+        try {
+          await _sb.rpc('register_student', params: {
+            'p_email': mail,
+            'p_password': password,
+            'p_full_name': fullName.trim(),
+            'p_phone': phone.trim(),
+            'p_dob': dob.toIso8601String().substring(0, 10),
+            'p_address': address.trim(),
+          });
+        } on PostgrestException catch (e) {
+          // Lần trước đã tạo xong tài khoản nhưng mất mạng lúc đăng nhập, người dùng bấm Đăng ký lại:
+          // đúng email + mật khẩu vừa tạo thì đăng nhập luôn thay vì báo "Email đã được sử dụng".
+          final msg = _dbMessage(e);
+          if (!msg.contains('Email đã được sử dụng')) rethrow;
+          try {
+            await _sb.auth.signInWithPassword(email: mail, password: password);
+          } on AuthException {
+            throw ApiException(msg); // email của người khác / sai mật khẩu → vẫn báo email đã dùng
+          }
+          await _loadProfile();
+          return;
+        }
+        try {
+          await _sb.auth.signInWithPassword(email: mail, password: password);
+          await _loadProfile();
+        } catch (_) {
+          throw ApiException('Đã tạo tài khoản thành công nhưng chưa đăng nhập được (lỗi mạng). '
+              'Vui lòng đăng nhập bằng email và mật khẩu vừa đăng ký.');
+        }
       });
 
   /// Tự cập nhật hồ sơ (họ tên, SĐT, ngày sinh, địa chỉ). Email và vai trò không đổi được.
@@ -596,9 +618,25 @@ class Api {
     throw ApiException('Đường dẫn không hợp lệ: $path');
   }
 
+  /// Dung lượng tối đa 1 tệp, phải khớp file_size_limit của bucket trong supabase_setup.sql.
+  static const maxUploadBytes = 10 * 1024 * 1024;
+  static const maxUploadText = '10MB';
+
+  static String _storageMessage(StorageException e) {
+    final m = e.message.toLowerCase();
+    if (e.statusCode == '413' || m.contains('exceeded') || m.contains('too large') || m.contains('size')) {
+      return 'Tệp quá lớn, tối đa $maxUploadText';
+    }
+    if (m.contains('row-level security') || m.contains('unauthorized') || e.statusCode == '403') {
+      return 'Bạn không có quyền thao tác với tệp này';
+    }
+    return e.message;
+  }
+
   /// Upload tệp vào bucket private. Trả về "storage:<đường dẫn>" để lưu vào DB;
   /// khi hiển thị dùng [fileUrl] để lấy link tạm thời (signed URL).
   Future<String> uploadFile(String fileName, Uint8List bytes, {String? mimeType}) => _auth(() async {
+        if (bytes.length > maxUploadBytes) throw ApiException('Tệp quá lớn, tối đa $maxUploadText');
         final uid = _sb.auth.currentUser?.id;
         if (uid == null) throw ApiException('Bạn cần đăng nhập lại');
         final cleanName = fileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
@@ -620,12 +658,43 @@ class Api {
     return _auth(() => _sb.storage.from('submissions').createSignedUrl(stored.substring(storagePrefix.length), 3600));
   }
 
+  /// Xóa tệp mình đã upload (bỏ qua lỗi). Server chỉ cho xóa tệp trong thư mục của mình
+  /// và không còn bài nộp / bài tập nào dùng (policy myacademy_delete).
+  Future<void> removeFile(String? stored) async {
+    if (stored == null || !stored.startsWith(storagePrefix)) return;
+    try {
+      await _sb.storage.from('submissions').remove([stored.substring(storagePrefix.length)]);
+    } catch (_) {}
+  }
+
+  static const _mimeByExt = {
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'webp': 'image/webp',
+    'gif': 'image/gif',
+    'heic': 'image/heic',
+    'pdf': 'application/pdf',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'txt': 'text/plain',
+    'csv': 'text/csv',
+    'zip': 'application/zip',
+    'rar': 'application/vnd.rar',
+    'mp3': 'audio/mpeg',
+    'm4a': 'audio/mp4',
+    'wav': 'audio/wav',
+    'mp4': 'video/mp4',
+  };
+
+  /// Loại tệp (MIME) theo đuôi tên tệp; không biết thì dùng [fallback] hoặc application/octet-stream.
   static String _guessMime(String name, {String? fallback}) {
-    final n = name.toLowerCase();
-    if (n.endsWith('.png')) return 'image/png';
-    if (n.endsWith('.jpg') || n.endsWith('.jpeg')) return 'image/jpeg';
-    if (n.endsWith('.webp')) return 'image/webp';
-    if (n.endsWith('.pdf')) return 'application/pdf';
-    return fallback ?? 'application/octet-stream';
+    final dot = name.lastIndexOf('.');
+    final ext = dot < 0 ? '' : name.substring(dot + 1).toLowerCase();
+    return _mimeByExt[ext] ?? fallback ?? 'application/octet-stream';
   }
 }
