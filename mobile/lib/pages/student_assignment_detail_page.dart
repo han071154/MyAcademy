@@ -31,41 +31,52 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
         _f = _load();
       });
 
+  @override
+  void dispose() {
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  /// Giữ tệp vừa chọn; quá dung lượng thì báo ngay, không chờ tới lúc upload.
+  void _setPicked(Uint8List bytes, String name, String? mime) {
+    if (!mounted) return;
+    if (bytes.length > Api.maxUploadBytes) {
+      toast(context, 'Tệp "$name" quá lớn (${(bytes.length / 1024 / 1024).toStringAsFixed(1)}MB), '
+          'tối đa ${Api.maxUploadText}');
+      return;
+    }
+    setState(() {
+      _pickedBytes = bytes;
+      _pickedName = name;
+      _pickedMime = mime;
+    });
+  }
+
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
     final file = await picker.pickImage(source: source, imageQuality: 85);
-    if (file != null) {
-      final bytes = await file.readAsBytes();
-      setState(() {
-        _pickedBytes = bytes;
-        _pickedName = file.name;
-        _pickedMime = file.mimeType ?? 'image/jpeg';
-      });
-    }
+    if (file != null) _setPicked(await file.readAsBytes(), file.name, file.mimeType ?? 'image/jpeg');
   }
 
   Future<void> _pickFile() async {
     final files = await FilePicker.pickFiles();
     if (files.isNotEmpty) {
       final f = files.first;
-      final bytes = await f.readAsBytes();
-      setState(() {
-        _pickedBytes = bytes;
-        _pickedName = f.name;
-        _pickedMime = f.name.contains('.') ? 'application/${f.name.split('.').last}' : 'application/octet-stream';
-      });
+      // Loại tệp (MIME) do Api đoán theo đuôi tên tệp (docx, xlsx, pdf...).
+      _setPicked(await f.readAsBytes(), f.name, null);
     }
   }
 
-  Future<void> _submit() async {
+  /// [old] = bài nộp hiện có (nếu có), để dọn tệp cũ sau khi nộp lại thành công.
+  Future<void> _submit(Map? old) async {
     if (_pickedBytes == null && _notesCtrl.text.trim().isEmpty) {
       toast(context, 'Vui lòng chọn ảnh/tệp nộp bài hoặc nhập nội dung');
       return;
     }
 
     setState(() => _submitting = true);
+    String? fileUrl;
     try {
-      String? fileUrl;
       String? fileName;
       if (_pickedBytes != null) {
         fileName = _pickedName ?? 'submission_${DateTime.now().millisecondsSinceEpoch}';
@@ -79,6 +90,10 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
         'notes': _notesCtrl.text.trim(),
       });
 
+      // Bài nộp mới đã thay bài cũ → tệp cũ không còn dùng nữa thì xóa khỏi Storage.
+      final oldFile = old?['file_url']?.toString();
+      if (oldFile != null && oldFile != fileUrl) await Api.i.removeFile(oldFile);
+
       if (mounted) {
         toast(context, 'Nộp bài tập thành công!');
         setState(() {
@@ -90,6 +105,8 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
         _reload();
       }
     } catch (e) {
+      // Server không nhận bài (quá hạn, đã chấm, chưa đóng học phí...) → xóa tệp vừa upload.
+      await Api.i.removeFile(fileUrl);
       if (mounted) toast(context, 'Lỗi nộp bài: $e');
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -398,7 +415,7 @@ class _StudentAssignmentDetailPageState extends State<StudentAssignmentDetailPag
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: _submitting ? null : _submit,
+                        onPressed: _submitting ? null : () => _submit(submission),
                         icon: _submitting
                             ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                             : const Icon(Icons.send_rounded, size: 18),

@@ -7,6 +7,69 @@ import '../theme.dart';
 import '../widgets.dart';
 import 'home_page.dart';
 
+/// Lần báo chuyển khoản MỚI NHẤT của lớp [classId] nếu đã bị trung tâm từ chối, ngược lại null.
+/// Học viên báo chuyển khoản lại (yêu cầu mới) thì lần bị từ chối cũ không còn là mới nhất → hết cảnh báo.
+/// [reqs] là danh sách từ Api.paymentRequests(), đã sắp xếp mới nhất trước.
+Map? latestRejectedRequest(List reqs, dynamic classId) {
+  for (final r in reqs) {
+    if ('${r['class_id']}' != '$classId') continue;
+    return r['status'] == 'REJECTED' ? r as Map : null;
+  }
+  return null;
+}
+
+/// Câu báo cho học viên biết khoản chuyển khoản bị từ chối và lý do.
+String rejectedMessage(Map r) {
+  final reason = (r['reject_reason'] ?? '').toString().trim();
+  return 'Trung tâm đã từ chối khoản chuyển ${vnd(r['amount'])} bạn báo lúc ${fmtDateTime(r['created_at'])}'
+      '${r['class_name'] != null ? ' cho lớp "${r['class_name']}"' : ''}. '
+      '${reason.isEmpty ? 'Trung tâm chưa nhận được khoản tiền này.' : 'Lý do: $reason.'} '
+      'Vui lòng kiểm tra lại giao dịch và đóng lại học phí.';
+}
+
+/// Hộp cảnh báo màu đỏ: lần chuyển khoản gần nhất bị từ chối.
+class RejectedNotice extends StatelessWidget {
+  final Map request;
+  final VoidCallback? onPay;
+  const RejectedNotice(this.request, {super.key, this.onPay});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: tint(AppColors.danger),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.danger.withValues(alpha: 0.5)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Row(children: [
+            Icon(Icons.cancel_rounded, color: AppColors.danger, size: 22),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text('Chuyển khoản bị từ chối',
+                  style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w800, fontSize: 15)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          Text(rejectedMessage(request), style: const TextStyle(height: 1.4)),
+          if (onPay != null) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onPay,
+                style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+                icon: const Icon(Icons.qr_code_2_rounded),
+                label: const Text('Đóng lại học phí'),
+              ),
+            ),
+          ],
+        ]),
+      );
+}
+
 /// Học viên đóng học phí 1 lớp bằng chuyển khoản: quét QR → chuyển đúng số tiền + nội dung
 /// → bấm "Tôi đã chuyển khoản" → chờ trung tâm xác nhận.
 class StudentPayPage extends StatefulWidget {
@@ -41,7 +104,9 @@ class _StudentPayPageState extends State<StudentPayPage> {
     final pending = reqs.where((r) => r['status'] == 'PENDING').fold<num>(0, (s, r) => s + _n(r['amount']));
     final due = fee - paid - pending;
     if (_amount.text.isEmpty && due > 0) _amount.text = due.toStringAsFixed(0);
-    return {'cls': cls, 'fee': fee, 'paid': paid, 'pending': pending, 'due': due, 'reqs': reqs};
+    // Lần báo gần nhất bị từ chối và vẫn còn phải đóng → hiện lý do để học viên biết vì sao chưa được tính tiền.
+    final rejected = due > 0 ? latestRejectedRequest(reqs, _classId) : null;
+    return {'cls': cls, 'fee': fee, 'paid': paid, 'pending': pending, 'due': due, 'reqs': reqs, 'rejected': rejected};
   }
 
   @override
@@ -134,7 +199,11 @@ class _StudentPayPageState extends State<StudentPayPage> {
             final d = data as Map;
             final due = d['due'] as num;
             final pending = d['pending'] as num;
+            final paid = d['paid'] as num;
             final code = PaymentConfig.transferCode(Api.i.userId, _classId);
+            // Hạn giữ chỗ: chưa đóng đồng nào và chưa báo chuyển khoản thì quá hạn sẽ tự hủy đăng ký.
+            final holdUntil = (d['cls'] as Map)['hold_until'];
+            final showHold = holdUntil != null && paid <= 0 && pending <= 0;
             return Form(
               key: _form,
               child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 24), children: [
@@ -149,6 +218,24 @@ class _StudentPayPageState extends State<StudentPayPage> {
                       Expanded(
                         child: Text('Đăng ký lớp "${widget.classData['name']}" thành công! Hãy đóng học phí để giữ chỗ.',
                             style: const TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ]),
+                  ),
+                if (d['rejected'] != null) RejectedNotice(d['rejected'] as Map),
+                if (showHold)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: tint(AppColors.amber), borderRadius: BorderRadius.circular(12)),
+                    child: Row(children: [
+                      const Icon(Icons.timer_outlined, color: AppColors.amber),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Chỗ của bạn được giữ đến ${fmtDateTime(holdUntil)}. '
+                          'Quá hạn mà chưa đóng hoặc chưa báo chuyển khoản thì đăng ký sẽ tự hủy.',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ]),
                   ),

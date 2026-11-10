@@ -11,6 +11,12 @@ Flutter (`mobile/`) → Supabase Cloud (PostgreSQL + Auth + Storage), không c�
    - Sau đó chạy `database/student_signup.sql` để bật chức năng **học viên tự đăng ký**. Mỗi lần chạy lại `supabase_setup.sql` thì chạy lại file này.
    - Tiếp theo chạy `database/student_rules.sql`: khóa nộp lại bài đã chấm, server tự ghi giờ nộp và chặn nộp sau hạn, mỗi khóa học chỉ đăng ký 1 lớp đang học. Chạy lại `supabase_setup.sql` thì cũng chạy lại file này.
    - Cuối cùng chạy `database/payment_requests.sql`: học viên đóng học phí bằng chuyển khoản theo mã QR, admin xác nhận ở mục Học phí → tab *Chờ xác nhận*. Đổi tài khoản nhận tiền: thay ảnh `mobile/assets/images/payment_qr.png` và sửa `mobile/lib/payment_config.dart`.
+   - Sau đó chạy `database/class_access.sql`: học viên chỉ vào được lớp (xem bài tập, nộp bài, xem điểm danh) khi đã có **ít nhất 1 khoản học phí được ghi nhận**, tức là đóng tiền mặt hoặc admin đã xác nhận chuyển khoản. Vẫn cho đóng nhiều đợt. Chạy lại `supabase_setup.sql` thì cũng chạy lại file này.
+   - **Cập nhật bản sửa lỗi phân hệ Học viên** (múi giờ, giữ chỗ 3 ngày, chốt học phí lúc đăng ký, ẩn thông tin giảng viên, chuẩn hóa SĐT, dọn tệp nộp bài): chạy lại lần lượt `supabase_setup.sql` → `student_signup.sql` → `student_rules.sql` → `payment_requests.sql` → `class_access.sql`.
+     - Ngày khai giảng / kết thúc tính theo giờ Việt Nam (`app_today()`), không theo giờ UTC của server.
+     - Học viên tự đăng ký lớp có thu phí được **giữ chỗ 3 ngày** (`enrollments.hold_until`). Quá hạn mà chưa có khoản thu, chưa báo chuyển khoản, chưa đi học thì đăng ký tự hủy để trả chỗ. Admin ghi danh hộ thì không giới hạn.
+     - Học phí được **chốt vào `enrollments.fee` lúc đăng ký**. Admin đổi học phí khóa học chỉ áp dụng cho người đăng ký sau.
+     - Học viên chỉ xem được **tên** giảng viên (hàm `teacher_display_name`), không đọc được email, SĐT, ngày sinh, địa chỉ của giảng viên.
    - Dữ liệu cũ từ trước: chạy `database/fix_data.sql` (sau `student_rules.sql`) để đồng bộ trạng thái lớp, chuẩn hóa email/SĐT và liệt kê chỗ còn thiếu. Xem toàn bộ dữ liệu: `database/inspect_data.sql`.
    - (Tùy chọn) chạy `database/demo_data.sql` để có dữ liệu mẫu đủ tình huống. Danh sách tài khoản demo nằm ở đầu file; mật khẩu tài khoản demo mới tạo là `Demo@1234`.
 3. Vào **Authentication → Sign In / Providers**:

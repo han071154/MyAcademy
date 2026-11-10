@@ -25,14 +25,22 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
     final classes = all.where((x) => x['course_id'] == _c['id']).toList();
     // Lớp (chưa kết thúc) của khóa này mà học viên đã đăng ký: mỗi khóa chỉ được 1 lớp.
     final joined = mine.where((x) => x['course_id'] == _c['id'] && x['status'] != 'CLOSED').toList();
-    return {'classes': classes, 'joined': joined};
+    // Lớp đang có chuyển khoản chờ xác nhận: không cho tự hủy (server cũng chặn).
+    final pending = joined.isEmpty
+        ? <String>{}
+        : (await Api.i.paymentRequests(status: 'PENDING').catchError((_) => []))
+            .map((r) => '${r['class_id']}')
+            .toSet();
+    return {'classes': classes, 'joined': joined, 'pending': pending};
   }
 
   void _reload() => setState(() => _f = _load());
 
   Future<void> _register(Map cls) async {
     final ok = await confirm(
-        context, 'Đăng ký lớp "${cls['name']}"?\nHọc phí: ${vnd(cls['fee'])}. Bạn có thể đóng ngay bằng chuyển khoản.');
+        context,
+        'Đăng ký lớp "${cls['name']}"?\nHọc phí: ${vnd(cls['fee'])}. Bạn có thể đóng ngay bằng chuyển khoản.\n'
+        'Lưu ý: chỗ của bạn được giữ 3 ngày, quá hạn chưa đóng học phí thì đăng ký tự hủy.');
     if (!ok || !mounted) return;
     if (!await guard(context, () => Api.i.post('/classes/${cls['id']}/enroll'))) return;
     if (!mounted) return;
@@ -87,8 +95,11 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
         ]),
       );
 
-  Widget _classCard(Map c, List joined) {
-    final isMine = joined.any((j) => j['id'] == c['id']);
+  Widget _classCard(Map c, List joined, Set pending) {
+    final mine = joined.cast<Map?>().firstWhere((j) => j!['id'] == c['id'], orElse: () => null);
+    final isMine = mine != null;
+    final paid = num.tryParse('${mine?['paid'] ?? 0}') ?? 0;
+    final hasPending = pending.contains('${c['id']}');
     final otherJoined = joined.where((j) => j['id'] != c['id']).toList();
     final full = (c['enrolled'] as num) >= (c['max_students'] as num);
     final start = DateTime.tryParse('${c['start_date'] ?? ''}');
@@ -104,11 +115,23 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
           icon: const Icon(Icons.login_rounded),
           label: const Text('Đã đăng ký • Vào Lớp học của tôi'),
         ),
-        if (open)
+        // Chỉ tự hủy được khi lớp chưa khai giảng, chưa đóng tiền, không có chuyển khoản chờ xác nhận.
+        if (open && paid <= 0 && !hasPending)
           TextButton(
             onPressed: () => _cancel(c),
             style: TextButton.styleFrom(foregroundColor: AppColors.danger),
             child: const Text('Hủy đăng ký'),
+          )
+        else if (open)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              hasPending
+                  ? 'Bạn có khoản chuyển khoản đang chờ xác nhận. Muốn hủy lớp, vui lòng liên hệ trung tâm.'
+                  : 'Bạn đã đóng học phí. Muốn hủy lớp, vui lòng liên hệ trung tâm.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.muted, fontSize: 13),
+            ),
           ),
       ]);
     } else if (otherJoined.isNotEmpty) {
@@ -129,7 +152,8 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
           Expanded(child: Text('${c['name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16))),
-          Pill(classStatusLabel(c['status'], role: 'STUDENT'), statusColor(c['status'])),
+          // Chỉ ghi "Đang học" cho lớp mình đã đăng ký; lớp khác ghi "Đang diễn ra" để không hiểu nhầm.
+          Pill(classStatusLabel(c['status'], role: isMine ? 'STUDENT' : null), statusColor(c['status'])),
         ]),
         const SizedBox(height: 8),
         MetaRow(Icons.person_outline, 'Giảng viên: ${c['teacher_name'] ?? 'chưa phân công'}'),
@@ -154,6 +178,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
             final d = data as Map;
             final classes = (d['classes'] as List).cast<Map>();
             final joined = d['joined'] as List;
+            final pending = d['pending'] as Set;
             // Lớp đang mở lên trước, lớp đã kết thúc ẩn đi.
             final shown = classes.where((c) => c['status'] != 'CLOSED').toList()
               ..sort((a, b) => (a['status'] == 'OPEN' ? 0 : 1).compareTo(b['status'] == 'OPEN' ? 0 : 1));
@@ -176,7 +201,7 @@ class _CourseDetailPageState extends State<CourseDetailPage> {
                       child: EmptyState('Hiện chưa có lớp nào của khóa học này'),
                     )
                   else
-                    for (final c in shown) _classCard(c, joined),
+                    for (final c in shown) _classCard(c, joined, pending),
                 ],
               ),
             );

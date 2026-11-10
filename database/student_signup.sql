@@ -11,6 +11,18 @@
 
 begin;
 
+-- Chuẩn hóa số điện thoại: bỏ khoảng trắng / dấu chấm / gạch ngang, đổi "+84" đầu số thành "0".
+-- Nhờ vậy "0912 345 678" và "+84912345678" được coi là cùng một số khi kiểm tra trùng.
+create or replace function normalize_phone(p text) returns text
+language sql immutable set search_path = public as $$
+  select regexp_replace(regexp_replace(coalesce(p, ''), '[\s.-]', '', 'g'), '^\+84', '0')
+$$;
+grant execute on function normalize_phone(text) to authenticated;
+
+-- Dữ liệu cũ đang lưu dạng +84 thì đổi về dạng 0.
+update users set phone = normalize_phone(phone)
+where phone is not null and phone <> normalize_phone(phone) and normalize_phone(phone) ~ '^0[0-9]{9}$';
+
 -- Bản cũ (số điện thoại không bắt buộc, chưa có ngày sinh / địa chỉ).
 drop function if exists register_student(text, text, text, text);
 
@@ -21,7 +33,7 @@ language plpgsql security definer set search_path = public, extensions, pg_temp 
 declare
   v_email text := lower(trim(coalesce(p_email, '')));
   v_name text := trim(coalesce(p_full_name, ''));
-  v_phone text := regexp_replace(coalesce(p_phone, ''), '[\s.-]', '', 'g');
+  v_phone text := normalize_phone(p_phone);
   v_address text := trim(coalesce(p_address, ''));
   v_uid uuid;
   v_new users%rowtype;
@@ -32,7 +44,7 @@ begin
   if v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' or length(v_email) > 254 then
     raise exception 'Email không hợp lệ';
   end if;
-  if v_phone !~ '^(0|\+84)[0-9]{9}$' then
+  if v_phone !~ '^0[0-9]{9}$' then
     raise exception 'Số điện thoại không hợp lệ (10 số, bắt đầu bằng 0)';
   end if;
   if p_dob is null or p_dob > current_date - interval '5 years' or p_dob < date '1900-01-01' then
@@ -54,7 +66,7 @@ begin
      or exists (select 1 from auth.users where lower(email) = v_email) then
     raise exception 'Email đã được sử dụng';
   end if;
-  if exists (select 1 from users where regexp_replace(coalesce(phone, ''), '[\s.-]', '', 'g') = v_phone) then
+  if exists (select 1 from users where normalize_phone(phone) = v_phone) then
     raise exception 'Số điện thoại đã được sử dụng';
   end if;
 
@@ -80,7 +92,7 @@ language plpgsql security definer set search_path = public, pg_temp as $$
 declare
   v_id bigint := app_uid();
   v_name text := trim(coalesce(p_full_name, ''));
-  v_phone text := regexp_replace(coalesce(p_phone, ''), '[\s.-]', '', 'g');
+  v_phone text := normalize_phone(p_phone);
   v_address text := trim(coalesce(p_address, ''));
   v_u users%rowtype;
 begin
@@ -88,7 +100,7 @@ begin
   if v_name = '' or length(v_name) > 100 then
     raise exception 'Vui lòng nhập họ tên (tối đa 100 ký tự)';
   end if;
-  if v_phone !~ '^(0|\+84)[0-9]{9}$' then
+  if v_phone !~ '^0[0-9]{9}$' then
     raise exception 'Số điện thoại không hợp lệ (10 số, bắt đầu bằng 0)';
   end if;
   if p_dob is null or p_dob > current_date - interval '5 years' or p_dob < date '1900-01-01' then
@@ -98,7 +110,7 @@ begin
     raise exception 'Vui lòng nhập địa chỉ';
   end if;
   if exists (select 1 from users
-             where id <> v_id and regexp_replace(coalesce(phone, ''), '[\s.-]', '', 'g') = v_phone) then
+             where id <> v_id and normalize_phone(phone) = v_phone) then
     raise exception 'Số điện thoại đã được sử dụng';
   end if;
 

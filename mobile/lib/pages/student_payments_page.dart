@@ -113,6 +113,8 @@ class _StudentPaymentsPageState extends State<StudentPaymentsPage> {
         .where((r) => r['class_id'] == c['id'] && r['status'] == 'PENDING')
         .fold<num>(0, (s, r) => s + _n(r['amount']));
     final progress = fee > 0 ? (paid / fee).clamp(0, 1).toDouble() : 1.0;
+    // Lần báo chuyển khoản gần nhất của lớp bị từ chối (chưa báo lại) → báo rõ cho học viên.
+    final rejected = debt > 0 ? latestRejectedRequest(reqs, c['id']) : null;
     return SoftCard(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
@@ -121,9 +123,16 @@ class _StudentPaymentsPageState extends State<StudentPaymentsPage> {
           Expanded(
             child: Text('${c['name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
           ),
-          Pill(debt <= 0 ? 'Đã đóng đủ' : (pending >= debt ? 'Chờ xác nhận' : 'Còn nợ'),
+          Pill(
+              debt <= 0
+                  ? 'Đã đóng đủ'
+                  : (pending >= debt ? 'Chờ xác nhận' : (rejected != null ? 'Bị từ chối' : 'Còn nợ')),
               debt <= 0 ? AppColors.ok : (pending >= debt ? AppColors.amber : AppColors.danger)),
         ]),
+        if (rejected != null) ...[
+          const SizedBox(height: 8),
+          RejectedNotice(rejected),
+        ],
         if (c['course_name'] != null)
           Text('${c['course_name']}', style: const TextStyle(color: AppColors.muted, fontSize: 13)),
         const SizedBox(height: 10),

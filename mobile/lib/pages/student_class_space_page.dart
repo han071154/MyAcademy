@@ -4,6 +4,57 @@ import '../api.dart';
 import '../theme.dart';
 import '../widgets.dart';
 import 'student_assignment_detail_page.dart';
+import 'student_pay_page.dart';
+
+/// Học viên chỉ vào lớp khi đã có ít nhất 1 khoản học phí được ghi nhận (hoặc lớp miễn phí).
+/// Server cũng chặn theo đúng quy tắc này (database/class_access.sql).
+bool canEnterClass(Map c) =>
+    (num.tryParse('${c['paid']}') ?? 0) > 0 || (num.tryParse('${c['fee']}') ?? 0) <= 0;
+
+/// Mở không gian lớp; chưa đóng tiền thì báo lý do và gợi ý đóng học phí.
+Future<void> openStudentClass(BuildContext context, Map c) async {
+  if (canEnterClass(c)) {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => StudentClassSpacePage(classData: c)));
+    return;
+  }
+  var pending = false;
+  Map? rejected;
+  try {
+    final reqs = await Api.i.paymentRequests();
+    pending = reqs.any((r) => '${r['class_id']}' == '${c['id']}' && r['status'] == 'PENDING');
+    rejected = pending ? null : latestRejectedRequest(reqs, c['id']);
+  } catch (_) {}
+  if (!context.mounted) return;
+  final pay = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      icon: Icon(
+          pending
+              ? Icons.hourglass_top_rounded
+              : (rejected != null ? Icons.cancel_rounded : Icons.lock_outline_rounded),
+          color: rejected != null ? AppColors.danger : AppColors.amber),
+      title: Text(pending ? 'Đang chờ xác nhận' : (rejected != null ? 'Chuyển khoản bị từ chối' : 'Lớp chưa mở')),
+      content: Text(pending
+          ? 'Bạn đã báo chuyển khoản cho lớp "${c['name']}". Lớp sẽ mở ngay khi trung tâm xác nhận đã nhận tiền.'
+          : (rejected != null
+              ? '${rejectedMessage(rejected)}\nLớp sẽ mở khi trung tâm xác nhận khoản đóng mới.'
+              : 'Bạn cần đóng ít nhất một đợt học phí cho lớp "${c['name']}" và được trung tâm xác nhận thì mới vào lớp được.')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(pending ? 'Đã hiểu' : 'Để sau')),
+        if (!pending)
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(rejected != null ? 'Đóng lại học phí' : 'Đóng học phí')),
+      ],
+    ),
+  );
+  if (pay == true && context.mounted) {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => StudentPayPage(classData: c)));
+  }
+}
 
 class StudentClassSpacePage extends StatefulWidget {
   final Map classData;
